@@ -37,6 +37,7 @@ import org.elasticsearch.action.support.TransportActions;
 import org.elasticsearch.cluster.ClusterService;
 import org.elasticsearch.cluster.ClusterState;
 import org.elasticsearch.cluster.block.ClusterBlockLevel;
+import org.elasticsearch.cluster.metadata.IndexNameExpressionResolver;
 import org.elasticsearch.cluster.node.DiscoveryNode;
 import org.elasticsearch.cluster.node.DiscoveryNodes;
 import org.elasticsearch.cluster.routing.GroupShardsIterator;
@@ -75,8 +76,9 @@ public abstract class TransportSearchTypeAction extends TransportAction<SearchRe
     protected final SearchPhaseController searchPhaseController;
 
     public TransportSearchTypeAction(Settings settings, ThreadPool threadPool, ClusterService clusterService,
-                                     SearchServiceTransportAction searchService, SearchPhaseController searchPhaseController, ActionFilters actionFilters) {
-        super(settings, SearchAction.NAME, threadPool, actionFilters);
+                                     SearchServiceTransportAction searchService, SearchPhaseController searchPhaseController,
+                                     ActionFilters actionFilters, IndexNameExpressionResolver indexNameExpressionResolver) {
+        super(settings, SearchAction.NAME, threadPool, actionFilters, indexNameExpressionResolver);
         this.clusterService = clusterService;
         this.searchService = searchService;
         this.searchPhaseController = searchPhaseController;
@@ -113,15 +115,18 @@ public abstract class TransportSearchTypeAction extends TransportAction<SearchRe
 
             clusterState.blocks().globalBlockedRaiseException(ClusterBlockLevel.READ);
 
-            String[] concreteIndices = clusterState.metaData().concreteIndices(request.indicesOptions(), request.indices());
+            // TODO: I think startTime() should become part of ActionRequest and that should be used both for index name
+            // date math expressions and $now in scripts. This way all apis will deal with now in the same way instead
+            // of just for the _search api
+            String[] concreteIndices = indexNameExpressionResolver.concreteIndices(clusterState, request.indicesOptions(), startTime(), request.indices());
 
             for (String index : concreteIndices) {
                 clusterState.blocks().indexBlockedRaiseException(ClusterBlockLevel.READ, index);
             }
 
-            Map<String, Set<String>> routingMap = clusterState.metaData().resolveSearchRouting(request.routing(), request.indices());
+            Map<String, Set<String>> routingMap = indexNameExpressionResolver.resolveSearchRouting(clusterState, request.routing(), request.indices());
 
-            shardsIts = clusterService.operationRouting().searchShards(clusterState, request.indices(), concreteIndices, routingMap, request.preference());
+            shardsIts = clusterService.operationRouting().searchShards(clusterState, concreteIndices, routingMap, request.preference());
             expectedSuccessfulOps = shardsIts.size();
             // we need to add 1 for non active partition, since we count it in the total!
             expectedTotalOps = shardsIts.totalSizeWith1ForEmpty();
@@ -157,7 +162,7 @@ public abstract class TransportSearchTypeAction extends TransportAction<SearchRe
                 if (node == null) {
                     onFirstPhaseResult(shardIndex, shard, null, shardIt, new NoShardAvailableActionException(shardIt.shardId()));
                 } else {
-                    String[] filteringAliases = clusterState.metaData().filteringAliases(shard.index(), request.indices());
+                    String[] filteringAliases = indexNameExpressionResolver.filteringAliases(clusterState, shard.index(), request.indices());
                     sendExecuteFirstPhase(node, internalSearchRequest(shard, shardsIts.size(), request, filteringAliases, startTime()), new ActionListener<FirstResult>() {
                         @Override
                         public void onResponse(FirstResult result) {
@@ -175,7 +180,7 @@ public abstract class TransportSearchTypeAction extends TransportAction<SearchRe
 
         void onFirstPhaseResult(int shardIndex, ShardRouting shard, FirstResult result, ShardIterator shardIt) {
             result.shardTarget(new SearchShardTarget(shard.currentNodeId(), shard.index(), shard.id()));
-            processFirstPhaseResult(shardIndex, shard, result);
+            processFirstPhaseResult(shardIndex, result);
             // we need to increment successful ops first before we compare the exit condition otherwise if we
             // are fast we could concurrently update totalOps but then preempt one of the threads which can
             // cause the successor to read a wrong value from successfulOps if second phase is very fast ie. count etc.
@@ -353,7 +358,7 @@ public abstract class TransportSearchTypeAction extends TransportAction<SearchRe
 
         protected abstract void sendExecuteFirstPhase(DiscoveryNode node, ShardSearchTransportRequest request, ActionListener<FirstResult> listener);
 
-        protected final void processFirstPhaseResult(int shardIndex, ShardRouting shard, FirstResult result) {
+        protected final void processFirstPhaseResult(int shardIndex, FirstResult result) {
             firstResults.set(shardIndex, result);
 
             if (logger.isTraceEnabled()) {

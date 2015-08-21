@@ -23,7 +23,6 @@ import org.apache.lucene.document.Document;
 import org.apache.lucene.document.Field;
 import org.apache.lucene.index.IndexOptions;
 import org.elasticsearch.Version;
-import org.elasticsearch.common.Nullable;
 import org.elasticsearch.common.Strings;
 import org.elasticsearch.common.lucene.Lucene;
 import org.elasticsearch.common.settings.Settings;
@@ -34,9 +33,8 @@ import org.elasticsearch.index.mapper.Mapper;
 import org.elasticsearch.index.mapper.MapperParsingException;
 import org.elasticsearch.index.mapper.MergeMappingException;
 import org.elasticsearch.index.mapper.MergeResult;
+import org.elasticsearch.index.mapper.MetadataFieldMapper;
 import org.elasticsearch.index.mapper.ParseContext;
-import org.elasticsearch.index.mapper.RootMapper;
-import org.elasticsearch.index.mapper.core.AbstractFieldMapper;
 
 import java.io.IOException;
 import java.util.Iterator;
@@ -49,12 +47,12 @@ import static org.elasticsearch.index.mapper.core.TypeParsers.parseField;
 /**
  *
  */
-public class RoutingFieldMapper extends AbstractFieldMapper implements RootMapper {
+public class RoutingFieldMapper extends MetadataFieldMapper {
 
     public static final String NAME = "_routing";
     public static final String CONTENT_TYPE = "_routing";
 
-    public static class Defaults extends AbstractFieldMapper.Defaults {
+    public static class Defaults {
         public static final String NAME = "_routing";
 
         public static final MappedFieldType FIELD_TYPE = new RoutingFieldType();
@@ -74,7 +72,7 @@ public class RoutingFieldMapper extends AbstractFieldMapper implements RootMappe
         public static final String PATH = null;
     }
 
-    public static class Builder extends AbstractFieldMapper.Builder<Builder, RoutingFieldMapper> {
+    public static class Builder extends MetadataFieldMapper.Builder<Builder, RoutingFieldMapper> {
 
         private boolean required = Defaults.REQUIRED;
 
@@ -104,7 +102,7 @@ public class RoutingFieldMapper extends AbstractFieldMapper implements RootMappe
         @Override
         public Mapper.Builder parse(String name, Map<String, Object> node, ParserContext parserContext) throws MapperParsingException {
             Builder builder = new Builder(parserContext.mapperService().fullName(NAME));
-            if (parserContext.indexVersionCreated().before(Version.V_2_0_0)) {
+            if (parserContext.indexVersionCreated().before(Version.V_2_0_0_beta1)) {
                 parseField(builder, builder.name, node, parserContext);
             }
             for (Iterator<Map.Entry<String, Object>> iterator = node.entrySet().iterator(); iterator.hasNext();) {
@@ -114,7 +112,7 @@ public class RoutingFieldMapper extends AbstractFieldMapper implements RootMappe
                 if (fieldName.equals("required")) {
                     builder.required(nodeBooleanValue(fieldNode));
                     iterator.remove();
-                } else if (fieldName.equals("path") && parserContext.indexVersionCreated().before(Version.V_2_0_0)) {
+                } else if (fieldName.equals("path") && parserContext.indexVersionCreated().before(Version.V_2_0_0_beta1)) {
                     builder.path(fieldNode.toString());
                     iterator.remove();
                 }
@@ -125,7 +123,9 @@ public class RoutingFieldMapper extends AbstractFieldMapper implements RootMappe
 
     static final class RoutingFieldType extends MappedFieldType {
 
-        public RoutingFieldType() {}
+        public RoutingFieldType() {
+            setFieldDataType(new FieldDataType("string"));
+        }
 
         protected RoutingFieldType(RoutingFieldType ref) {
             super(ref);
@@ -158,19 +158,9 @@ public class RoutingFieldMapper extends AbstractFieldMapper implements RootMappe
     }
 
     protected RoutingFieldMapper(MappedFieldType fieldType, boolean required, String path, Settings indexSettings) {
-        super(fieldType, false, null, indexSettings);
+        super(NAME, fieldType, Defaults.FIELD_TYPE, indexSettings);
         this.required = required;
         this.path = path;
-    }
-
-    @Override
-    public MappedFieldType defaultFieldType() {
-        return Defaults.FIELD_TYPE;
-    }
-
-    @Override
-    public FieldDataType defaultFieldDataType() {
-        return new FieldDataType("string");
     }
 
     public void markAsRequired() {

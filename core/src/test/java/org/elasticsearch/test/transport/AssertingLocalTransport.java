@@ -22,21 +22,43 @@ package org.elasticsearch.test.transport;
 import org.elasticsearch.Version;
 import org.elasticsearch.cluster.node.DiscoveryNode;
 import org.elasticsearch.common.inject.Inject;
+import org.elasticsearch.common.io.stream.NamedWriteableRegistry;
 import org.elasticsearch.common.settings.Settings;
-import org.elasticsearch.test.ElasticsearchIntegrationTest;
+import org.elasticsearch.plugins.Plugin;
+import org.elasticsearch.test.ESIntegTestCase;
 import org.elasticsearch.test.VersionUtils;
 import org.elasticsearch.test.hamcrest.ElasticsearchAssertions;
 import org.elasticsearch.threadpool.ThreadPool;
-import org.elasticsearch.transport.*;
+import org.elasticsearch.transport.TransportException;
+import org.elasticsearch.transport.TransportModule;
+import org.elasticsearch.transport.TransportRequest;
+import org.elasticsearch.transport.TransportRequestOptions;
+import org.elasticsearch.transport.TransportResponse;
+import org.elasticsearch.transport.TransportResponseHandler;
 import org.elasticsearch.transport.local.LocalTransport;
 
 import java.io.IOException;
 import java.util.Random;
 
-/**
- *
- */
 public class AssertingLocalTransport extends LocalTransport {
+
+    public static class TestPlugin extends Plugin {
+        @Override
+        public String name() {
+            return "asserting-local-transport";
+        }
+        @Override
+        public String description() {
+            return "an asserting transport for testing";
+        }
+        public void onModule(TransportModule transportModule) {
+            transportModule.addTransport("mock", AssertingLocalTransport.class);
+        }
+        @Override
+        public Settings additionalSettings() {
+            return Settings.builder().put(TransportModule.TRANSPORT_TYPE_KEY, "mock").build();
+        }
+    }
 
     public static final String ASSERTING_TRANSPORT_MIN_VERSION_KEY = "transport.asserting.version.min";
     public static final String ASSERTING_TRANSPORT_MAX_VERSION_KEY = "transport.asserting.version.max";
@@ -45,9 +67,9 @@ public class AssertingLocalTransport extends LocalTransport {
     private final Version maxVersion;
 
     @Inject
-    public AssertingLocalTransport(Settings settings, ThreadPool threadPool, Version version) {
-        super(settings, threadPool, version);
-        final long seed = settings.getAsLong(ElasticsearchIntegrationTest.SETTING_INDEX_SEED, 0l);
+    public AssertingLocalTransport(Settings settings, ThreadPool threadPool, Version version, NamedWriteableRegistry namedWriteableRegistry) {
+        super(settings, threadPool, version, namedWriteableRegistry);
+        final long seed = settings.getAsLong(ESIntegTestCase.SETTING_INDEX_SEED, 0l);
         random = new Random(seed);
         minVersion = settings.getAsVersion(ASSERTING_TRANSPORT_MIN_VERSION_KEY, Version.V_0_18_0);
         maxVersion = settings.getAsVersion(ASSERTING_TRANSPORT_MAX_VERSION_KEY, Version.CURRENT);

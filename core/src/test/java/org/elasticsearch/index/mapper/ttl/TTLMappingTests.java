@@ -29,13 +29,12 @@ import org.elasticsearch.cluster.metadata.MetaData;
 import org.elasticsearch.common.bytes.BytesReference;
 import org.elasticsearch.common.compress.CompressedXContent;
 import org.elasticsearch.common.settings.Settings;
-import org.elasticsearch.common.settings.Settings;
 import org.elasticsearch.common.xcontent.XContentBuilder;
 import org.elasticsearch.common.xcontent.XContentFactory;
 import org.elasticsearch.index.mapper.*;
 import org.elasticsearch.index.mapper.internal.TTLFieldMapper;
 import org.elasticsearch.index.IndexService;
-import org.elasticsearch.test.ElasticsearchSingleNodeTest;
+import org.elasticsearch.test.ESSingleNodeTestCase;
 import org.junit.Test;
 
 import java.io.IOException;
@@ -45,7 +44,7 @@ import static org.hamcrest.Matchers.containsString;
 import static org.hamcrest.Matchers.equalTo;
 import static org.hamcrest.Matchers.notNullValue;
 
-public class TTLMappingTests extends ElasticsearchSingleNodeTest {
+public class TTLMappingTests extends ESSingleNodeTestCase {
     @Test
     public void testSimpleDisabled() throws Exception {
         String mapping = XContentFactory.jsonBuilder().startObject().startObject("type").endObject().string();
@@ -308,7 +307,7 @@ public class TTLMappingTests extends ElasticsearchSingleNodeTest {
 
         // _ttl in a document never worked, so backcompat is ignoring the field
         assertEquals(-1, request.ttl());
-        assertNull(docMapper.parse("type", "1", doc.bytes()).rootDoc().get("_ttl"));
+        assertNull(docMapper.parse("test", "type", "1", doc.bytes()).rootDoc().get("_ttl"));
     }
 
     private org.elasticsearch.common.xcontent.XContentBuilder getMappingWithTtlEnabled() throws IOException {

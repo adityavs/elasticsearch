@@ -29,6 +29,7 @@ import org.elasticsearch.cluster.node.DiscoveryNodes;
 import org.elasticsearch.common.Nullable;
 import org.elasticsearch.common.collect.ImmutableOpenMap;
 import org.elasticsearch.common.collect.Tuple;
+import org.elasticsearch.common.io.stream.NamedWriteableRegistry;
 import org.elasticsearch.common.io.stream.StreamOutput;
 import org.elasticsearch.common.settings.Settings;
 import org.elasticsearch.discovery.Discovery;
@@ -37,7 +38,7 @@ import org.elasticsearch.discovery.zen.DiscoveryNodesProvider;
 import org.elasticsearch.discovery.zen.publish.PublishClusterStateAction;
 import org.elasticsearch.node.service.NodeService;
 import org.elasticsearch.node.settings.NodeSettingsService;
-import org.elasticsearch.test.ElasticsearchTestCase;
+import org.elasticsearch.test.ESTestCase;
 import org.elasticsearch.test.junit.annotations.TestLogging;
 import org.elasticsearch.test.transport.MockTransportService;
 import org.elasticsearch.threadpool.ThreadPool;
@@ -59,7 +60,7 @@ import java.util.concurrent.atomic.AtomicBoolean;
 import static com.google.common.collect.Maps.newHashMap;
 import static org.hamcrest.Matchers.*;
 
-public class ClusterStateDiffPublishingTests extends ElasticsearchTestCase {
+public class ClusterStateDiffPublishingTests extends ESTestCase {
 
     protected ThreadPool threadPool;
     protected Map<String, MockNode> nodes = newHashMap();
@@ -87,7 +88,7 @@ public class ClusterStateDiffPublishingTests extends ElasticsearchTestCase {
         return createMockNode(name, settings, version, new PublishClusterStateAction.NewClusterStateListener() {
             @Override
             public void onNewClusterState(ClusterState clusterState, NewStateProcessed newStateProcessed) {
-                logger.debug("Node [{}] onNewClusterState version [{}], uuid [{}]", name, clusterState.version(), clusterState.uuid());
+                logger.debug("Node [{}] onNewClusterState version [{}], uuid [{}]", name, clusterState.version(), clusterState.stateUUID());
                 newStateProcessed.onNewClusterStateProcessed();
             }
         });
@@ -168,7 +169,7 @@ public class ClusterStateDiffPublishingTests extends ElasticsearchTestCase {
     }
 
     protected MockTransportService buildTransportService(Settings settings, Version version) {
-        MockTransportService transportService = new MockTransportService(settings, new LocalTransport(settings, threadPool, version), threadPool);
+        MockTransportService transportService = new MockTransportService(settings, new LocalTransport(settings, threadPool, version, new NamedWriteableRegistry()), threadPool);
         transportService.start();
         return transportService;
     }
@@ -392,7 +393,7 @@ public class ClusterStateDiffPublishingTests extends ElasticsearchTestCase {
         MockNode nodeB = createMockNode("nodeB", noDiffPublishingSettings, Version.CURRENT, new PublishClusterStateAction.NewClusterStateListener() {
             @Override
             public void onNewClusterState(ClusterState clusterState, NewStateProcessed newStateProcessed) {
-                logger.debug("Got cluster state update, version [{}], guid [{}], from diff [{}]", clusterState.version(), clusterState.uuid(), clusterState.wasReadFromDiff());
+                logger.debug("Got cluster state update, version [{}], guid [{}], from diff [{}]", clusterState.version(), clusterState.stateUUID(), clusterState.wasReadFromDiff());
                 assertFalse(clusterState.wasReadFromDiff());
                 newStateProcessed.onNewClusterStateProcessed();
             }
@@ -496,7 +497,7 @@ public class ClusterStateDiffPublishingTests extends ElasticsearchTestCase {
             }
         });
 
-        ClusterState unserializableClusterState = new ClusterState(clusterState.version(), clusterState.uuid(), clusterState) {
+        ClusterState unserializableClusterState = new ClusterState(clusterState.version(), clusterState.stateUUID(), clusterState) {
             @Override
             public Diff<ClusterState> diff(ClusterState previousState) {
                 return new Diff<ClusterState>() {
@@ -615,7 +616,7 @@ public class ClusterStateDiffPublishingTests extends ElasticsearchTestCase {
     public static class DelegatingClusterState extends ClusterState {
 
         public DelegatingClusterState(ClusterState clusterState) {
-            super(clusterState.version(), clusterState.uuid(), clusterState);
+            super(clusterState.version(), clusterState.stateUUID(), clusterState);
         }
 
 

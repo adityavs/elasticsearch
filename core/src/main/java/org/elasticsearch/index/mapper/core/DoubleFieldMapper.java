@@ -24,7 +24,6 @@ import com.carrotsearch.hppc.DoubleArrayList;
 import org.apache.lucene.analysis.Analyzer;
 import org.apache.lucene.analysis.TokenStream;
 import org.apache.lucene.document.Field;
-import org.apache.lucene.document.FieldType.NumericType;
 import org.apache.lucene.index.IndexOptions;
 import org.apache.lucene.index.Terms;
 import org.apache.lucene.search.NumericRangeQuery;
@@ -34,7 +33,6 @@ import org.apache.lucene.util.BytesRefBuilder;
 import org.apache.lucene.util.NumericUtils;
 import org.elasticsearch.action.fieldstats.FieldStats;
 import org.elasticsearch.common.Explicit;
-import org.elasticsearch.common.Nullable;
 import org.elasticsearch.common.Numbers;
 import org.elasticsearch.common.settings.Settings;
 import org.elasticsearch.common.unit.Fuzziness;
@@ -44,14 +42,10 @@ import org.elasticsearch.common.xcontent.XContentBuilder;
 import org.elasticsearch.common.xcontent.XContentParser;
 import org.elasticsearch.index.analysis.NamedAnalyzer;
 import org.elasticsearch.index.analysis.NumericDoubleAnalyzer;
-import org.elasticsearch.index.fielddata.FieldDataType;
 import org.elasticsearch.index.mapper.MappedFieldType;
 import org.elasticsearch.index.mapper.Mapper;
 import org.elasticsearch.index.mapper.MapperParsingException;
-import org.elasticsearch.index.mapper.MergeMappingException;
-import org.elasticsearch.index.mapper.MergeResult;
 import org.elasticsearch.index.mapper.ParseContext;
-import org.elasticsearch.index.query.QueryParseContext;
 
 import java.io.IOException;
 import java.util.Iterator;
@@ -88,8 +82,8 @@ public class DoubleFieldMapper extends NumberFieldMapper {
         @Override
         public DoubleFieldMapper build(BuilderContext context) {
             setupFieldType(context);
-            DoubleFieldMapper fieldMapper = new DoubleFieldMapper(fieldType, docValues, ignoreMalformed(context), coerce(context),
-                    fieldDataSettings, context.indexSettings(), multiFieldsBuilder.build(this, context), copyTo);
+            DoubleFieldMapper fieldMapper = new DoubleFieldMapper(name, fieldType, defaultFieldType, ignoreMalformed(context), coerce(context),
+                    context.indexSettings(), multiFieldsBuilder.build(this, context), copyTo);
             fieldMapper.includeInAll(includeInAll);
             return fieldMapper;
         }
@@ -174,7 +168,7 @@ public class DoubleFieldMapper extends NumberFieldMapper {
         }
 
         @Override
-        public Query rangeQuery(Object lowerTerm, Object upperTerm, boolean includeLower, boolean includeUpper, @Nullable QueryParseContext context) {
+        public Query rangeQuery(Object lowerTerm, Object upperTerm, boolean includeLower, boolean includeUpper) {
             return NumericRangeQuery.newDoubleRange(names().indexName(), numericPrecisionStep(),
                 lowerTerm == null ? null : parseDoubleValue(lowerTerm),
                 upperTerm == null ? null : parseDoubleValue(upperTerm),
@@ -182,8 +176,8 @@ public class DoubleFieldMapper extends NumberFieldMapper {
         }
 
         @Override
-        public Query fuzzyQuery(String value, Fuzziness fuzziness, int prefixLength, int maxExpansions, boolean transpositions) {
-            double iValue = Double.parseDouble(value);
+        public Query fuzzyQuery(Object value, Fuzziness fuzziness, int prefixLength, int maxExpansions, boolean transpositions) {
+            double iValue = parseDoubleValue(value);
             double iSim = fuzziness.asDouble();
             return NumericRangeQuery.newDoubleRange(names().indexName(), numericPrecisionStep(),
                 iValue - iSim,
@@ -201,24 +195,14 @@ public class DoubleFieldMapper extends NumberFieldMapper {
         }
     }
 
-    protected DoubleFieldMapper(MappedFieldType fieldType, Boolean docValues, Explicit<Boolean> ignoreMalformed, Explicit<Boolean> coerce,
-                                @Nullable Settings fieldDataSettings, Settings indexSettings, MultiFields multiFields, CopyTo copyTo) {
-        super(fieldType, docValues, ignoreMalformed, coerce, fieldDataSettings, indexSettings, multiFields, copyTo);
+    protected DoubleFieldMapper(String simpleName, MappedFieldType fieldType, MappedFieldType defaultFieldType, Explicit<Boolean> ignoreMalformed,
+                                Explicit<Boolean> coerce, Settings indexSettings, MultiFields multiFields, CopyTo copyTo) {
+        super(simpleName, fieldType, defaultFieldType, ignoreMalformed, coerce, indexSettings, multiFields, copyTo);
     }
 
     @Override
     public DoubleFieldType fieldType() {
         return (DoubleFieldType) super.fieldType();
-    }
-
-    @Override
-    public MappedFieldType defaultFieldType() {
-        return Defaults.FIELD_TYPE;
-    }
-
-    @Override
-    public FieldDataType defaultFieldDataType() {
-        return new FieldDataType("double");
     }
 
     @Override
@@ -297,7 +281,7 @@ public class DoubleFieldMapper extends NumberFieldMapper {
         }
 
         if (fieldType().indexOptions() != IndexOptions.NONE || fieldType().stored()) {
-            CustomDoubleNumericField field = new CustomDoubleNumericField(this, value, fieldType());
+            CustomDoubleNumericField field = new CustomDoubleNumericField(value, fieldType());
             field.setBoost(boost);
             fields.add(field);
         }
@@ -343,18 +327,15 @@ public class DoubleFieldMapper extends NumberFieldMapper {
 
         private final double number;
 
-        private final NumberFieldMapper mapper;
-
-        public CustomDoubleNumericField(NumberFieldMapper mapper, double number, NumberFieldType fieldType) {
-            super(mapper, number, fieldType);
-            this.mapper = mapper;
+        public CustomDoubleNumericField(double number, NumberFieldType fieldType) {
+            super(number, fieldType);
             this.number = number;
         }
 
         @Override
         public TokenStream tokenStream(Analyzer analyzer, TokenStream previous) throws IOException {
             if (fieldType().indexOptions() != IndexOptions.NONE) {
-                return mapper.popCachedStream().setDoubleValue(number);
+                return getCachedStream().setDoubleValue(number);
             }
             return null;
         }

@@ -21,14 +21,13 @@ package org.elasticsearch.index.aliases;
 
 import org.elasticsearch.common.compress.CompressedXContent;
 import org.elasticsearch.common.settings.Settings;
-import org.elasticsearch.common.settings.Settings;
 import org.elasticsearch.common.xcontent.ToXContent;
 import org.elasticsearch.common.xcontent.XContentBuilder;
 import org.elasticsearch.common.xcontent.XContentFactory;
-import org.elasticsearch.index.query.QueryBuilder;
 import org.elasticsearch.index.IndexService;
+import org.elasticsearch.index.query.QueryBuilder;
 import org.elasticsearch.indices.InvalidAliasNameException;
-import org.elasticsearch.test.ElasticsearchSingleNodeTest;
+import org.elasticsearch.test.ESSingleNodeTestCase;
 import org.junit.Test;
 
 import java.io.IOException;
@@ -40,7 +39,7 @@ import static org.hamcrest.Matchers.nullValue;
 /**
  *
  */
-public class IndexAliasesServiceTests extends ElasticsearchSingleNodeTest {
+public class IndexAliasesServiceTests extends ESSingleNodeTestCase {
 
     public IndexAliasesService newIndexAliasesService() {
         Settings settings = Settings.builder().put("name", "IndexAliasesServiceTests").build();

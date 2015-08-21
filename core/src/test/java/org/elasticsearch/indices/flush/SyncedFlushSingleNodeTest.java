@@ -27,15 +27,16 @@ import org.elasticsearch.index.IndexService;
 import org.elasticsearch.index.engine.Engine;
 import org.elasticsearch.index.shard.IndexShard;
 import org.elasticsearch.index.shard.ShardId;
+import org.elasticsearch.index.shard.ShardNotFoundException;
 import org.elasticsearch.indices.IndicesService;
-import org.elasticsearch.test.ElasticsearchSingleNodeTest;
+import org.elasticsearch.test.ESSingleNodeTestCase;
 
 import java.util.List;
 import java.util.Map;
 
 /**
  */
-public class SyncedFlushSingleNodeTest extends ElasticsearchSingleNodeTest {
+public class SyncedFlushSingleNodeTest extends ESSingleNodeTestCase {
 
     public void testModificationPreventsFlushing() throws InterruptedException {
         createIndex("test");
@@ -136,7 +137,8 @@ public class SyncedFlushSingleNodeTest extends ElasticsearchSingleNodeTest {
         listener.latch.await();
         assertNotNull(listener.error);
         assertNull(listener.result);
-        assertEquals("missing", listener.error.getMessage());
+        assertEquals(ShardNotFoundException.class, listener.error.getClass());
+        assertEquals("no such shard", listener.error.getMessage());
 
         final ShardId shardId = shard.shardId();
 
@@ -149,7 +151,7 @@ public class SyncedFlushSingleNodeTest extends ElasticsearchSingleNodeTest {
         assertEquals("closed", listener.error.getMessage());
 
         listener = new SyncedFlushUtil.LatchedListener();
-        flushService.attemptSyncedFlush(new ShardId("nosuchindex", 0), listener);
+        flushService.attemptSyncedFlush(new ShardId("index not found", 0), listener);
         listener.latch.await();
         assertNotNull(listener.error);
         assertNull(listener.result);

@@ -21,7 +21,7 @@ package org.elasticsearch.common.util.concurrent;
 import com.google.common.collect.Lists;
 import org.elasticsearch.common.Priority;
 import org.elasticsearch.common.unit.TimeValue;
-import org.elasticsearch.test.ElasticsearchTestCase;
+import org.elasticsearch.test.ESTestCase;
 import org.elasticsearch.threadpool.ThreadPool;
 import org.junit.Test;
 
@@ -37,7 +37,7 @@ import static org.hamcrest.Matchers.is;
 /**
  *
  */
-public class PrioritizedExecutorsTests extends ElasticsearchTestCase {
+public class PrioritizedExecutorsTests extends ESTestCase {
 
     @Test
     public void testPriorityQueue() throws Exception {
@@ -61,7 +61,7 @@ public class PrioritizedExecutorsTests extends ElasticsearchTestCase {
 
     @Test
     public void testSubmitPrioritizedExecutorWithRunnables() throws Exception {
-        ExecutorService executor = EsExecutors.newSinglePrioritizing(EsExecutors.daemonThreadFactory(getTestName()));
+        ExecutorService executor = EsExecutors.newSinglePrioritizing(getTestName(), EsExecutors.daemonThreadFactory(getTestName()));
         List<Integer> results = new ArrayList<>(8);
         CountDownLatch awaitingLatch = new CountDownLatch(1);
         CountDownLatch finishedLatch = new CountDownLatch(8);
@@ -91,7 +91,7 @@ public class PrioritizedExecutorsTests extends ElasticsearchTestCase {
 
     @Test
     public void testExecutePrioritizedExecutorWithRunnables() throws Exception {
-        ExecutorService executor = EsExecutors.newSinglePrioritizing(EsExecutors.daemonThreadFactory(getTestName()));
+        ExecutorService executor = EsExecutors.newSinglePrioritizing(getTestName(), EsExecutors.daemonThreadFactory(getTestName()));
         List<Integer> results = new ArrayList<>(8);
         CountDownLatch awaitingLatch = new CountDownLatch(1);
         CountDownLatch finishedLatch = new CountDownLatch(8);
@@ -121,7 +121,7 @@ public class PrioritizedExecutorsTests extends ElasticsearchTestCase {
 
     @Test
     public void testSubmitPrioritizedExecutorWithCallables() throws Exception {
-        ExecutorService executor = EsExecutors.newSinglePrioritizing(EsExecutors.daemonThreadFactory(getTestName()));
+        ExecutorService executor = EsExecutors.newSinglePrioritizing(getTestName(), EsExecutors.daemonThreadFactory(getTestName()));
         List<Integer> results = new ArrayList<>(8);
         CountDownLatch awaitingLatch = new CountDownLatch(1);
         CountDownLatch finishedLatch = new CountDownLatch(8);
@@ -151,7 +151,7 @@ public class PrioritizedExecutorsTests extends ElasticsearchTestCase {
 
     @Test
     public void testSubmitPrioritizedExecutorWithMixed() throws Exception {
-        ExecutorService executor = EsExecutors.newSinglePrioritizing(EsExecutors.daemonThreadFactory(getTestName()));
+        ExecutorService executor = EsExecutors.newSinglePrioritizing(getTestName(), EsExecutors.daemonThreadFactory(getTestName()));
         List<Integer> results = new ArrayList<>(8);
         CountDownLatch awaitingLatch = new CountDownLatch(1);
         CountDownLatch finishedLatch = new CountDownLatch(8);
@@ -182,7 +182,7 @@ public class PrioritizedExecutorsTests extends ElasticsearchTestCase {
     @Test
     public void testTimeout() throws Exception {
         ScheduledExecutorService timer = Executors.newSingleThreadScheduledExecutor(EsExecutors.daemonThreadFactory(getTestName()));
-        PrioritizedEsThreadPoolExecutor executor = EsExecutors.newSinglePrioritizing(EsExecutors.daemonThreadFactory(getTestName()));
+        PrioritizedEsThreadPoolExecutor executor = EsExecutors.newSinglePrioritizing(getTestName(), EsExecutors.daemonThreadFactory(getTestName()));
         final CountDownLatch invoked = new CountDownLatch(1);
         final CountDownLatch block = new CountDownLatch(1);
         executor.execute(new Runnable() {
@@ -244,16 +244,16 @@ public class PrioritizedExecutorsTests extends ElasticsearchTestCase {
     @Test
     public void testTimeoutCleanup() throws Exception {
         ThreadPool threadPool = new ThreadPool("test");
-        ScheduledThreadPoolExecutor timer = (ScheduledThreadPoolExecutor) threadPool.scheduler();
+        final ScheduledThreadPoolExecutor timer = (ScheduledThreadPoolExecutor) threadPool.scheduler();
         final AtomicBoolean timeoutCalled = new AtomicBoolean();
-        PrioritizedEsThreadPoolExecutor executor = EsExecutors.newSinglePrioritizing(EsExecutors.daemonThreadFactory(getTestName()));
+        PrioritizedEsThreadPoolExecutor executor = EsExecutors.newSinglePrioritizing(getTestName(), EsExecutors.daemonThreadFactory(getTestName()));
         final CountDownLatch invoked = new CountDownLatch(1);
         executor.execute(new Runnable() {
                              @Override
                              public void run() {
                                  invoked.countDown();
                              }
-                         }, timer, TimeValue.timeValueMillis(1000), new Runnable() {
+                         }, timer, TimeValue.timeValueHours(1), new Runnable() {
                     @Override
                     public void run() {
                         // We should never get here
@@ -262,7 +262,15 @@ public class PrioritizedExecutorsTests extends ElasticsearchTestCase {
                 }
         );
         invoked.await();
-        assertThat(timer.getQueue().size(), equalTo(0));
+
+        // the timeout handler is added post execution (and quickly cancelled). We have allow for this
+        // and use assert busy
+        assertBusy(new Runnable() {
+            @Override
+            public void run() {
+                assertThat(timer.getQueue().size(), equalTo(0));
+            }
+        }, 5, TimeUnit.SECONDS);
         assertThat(timeoutCalled.get(), equalTo(false));
         assertTrue(terminate(executor));
         assertTrue(terminate(threadPool));

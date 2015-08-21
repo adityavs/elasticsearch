@@ -28,7 +28,7 @@ import org.elasticsearch.cluster.routing.RoutingNodes;
 import org.elasticsearch.cluster.routing.RoutingTable;
 import org.elasticsearch.common.logging.ESLogger;
 import org.elasticsearch.common.logging.Loggers;
-import org.elasticsearch.test.ElasticsearchAllocationTestCase;
+import org.elasticsearch.test.ESAllocationTestCase;
 import org.junit.Test;
 
 import static org.elasticsearch.cluster.routing.ShardRoutingState.*;
@@ -39,7 +39,7 @@ import static org.hamcrest.Matchers.nullValue;
 /**
  *
  */
-public class SingleShardOneReplicaRoutingTests extends ElasticsearchAllocationTestCase {
+public class SingleShardOneReplicaRoutingTests extends ESAllocationTestCase {
 
     private final ESLogger logger = Loggers.getLogger(SingleShardOneReplicaRoutingTests.class);
 
@@ -93,7 +93,7 @@ public class SingleShardOneReplicaRoutingTests extends ElasticsearchAllocationTe
         assertThat(prevRoutingTable == routingTable, equalTo(true));
 
         logger.info("Start the primary shard (on node1)");
-        RoutingNodes routingNodes = clusterState.routingNodes();
+        RoutingNodes routingNodes = clusterState.getRoutingNodes();
         prevRoutingTable = routingTable;
         routingTable = strategy.applyStartedShards(clusterState, routingNodes.node("node1").shardsWithState(INITIALIZING)).routingTable();
         clusterState = ClusterState.builder(clusterState).routingTable(routingTable).build();
@@ -116,7 +116,7 @@ public class SingleShardOneReplicaRoutingTests extends ElasticsearchAllocationTe
         assertThat(prevRoutingTable == routingTable, equalTo(true));
 
         logger.info("Start the backup shard");
-        routingNodes = clusterState.routingNodes();
+        routingNodes = clusterState.getRoutingNodes();
         prevRoutingTable = routingTable;
         routingTable = strategy.applyStartedShards(clusterState, routingNodes.node("node2").shardsWithState(INITIALIZING)).routingTable();
         clusterState = ClusterState.builder(clusterState).routingTable(routingTable).build();

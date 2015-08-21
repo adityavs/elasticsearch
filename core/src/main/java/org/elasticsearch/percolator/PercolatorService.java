@@ -20,18 +20,11 @@ package org.elasticsearch.percolator;
 
 import com.carrotsearch.hppc.IntObjectHashMap;
 import com.google.common.collect.Lists;
-
 import org.apache.lucene.index.LeafReaderContext;
 import org.apache.lucene.index.ReaderUtil;
 import org.apache.lucene.index.memory.ExtendedMemoryIndex;
 import org.apache.lucene.index.memory.MemoryIndex;
-import org.apache.lucene.search.BooleanClause;
-import org.apache.lucene.search.BooleanQuery;
-import org.apache.lucene.search.ConstantScoreQuery;
-import org.apache.lucene.search.MatchAllDocsQuery;
-import org.apache.lucene.search.Query;
-import org.apache.lucene.search.ScoreDoc;
-import org.apache.lucene.search.TopDocs;
+import org.apache.lucene.search.*;
 import org.apache.lucene.util.BytesRef;
 import org.apache.lucene.util.CloseableThreadLocal;
 import org.elasticsearch.ElasticsearchParseException;
@@ -41,6 +34,8 @@ import org.elasticsearch.action.percolate.PercolateShardResponse;
 import org.elasticsearch.cache.recycler.PageCacheRecycler;
 import org.elasticsearch.cluster.ClusterService;
 import org.elasticsearch.cluster.action.index.MappingUpdatedAction;
+import org.elasticsearch.cluster.metadata.IndexNameExpressionResolver;
+import org.elasticsearch.common.ParseFieldMatcher;
 import org.elasticsearch.common.bytes.BytesArray;
 import org.elasticsearch.common.bytes.BytesReference;
 import org.elasticsearch.common.collect.Tuple;
@@ -64,22 +59,13 @@ import org.elasticsearch.index.IndexService;
 import org.elasticsearch.index.engine.Engine;
 import org.elasticsearch.index.fielddata.IndexFieldData;
 import org.elasticsearch.index.fielddata.SortedBinaryDocValues;
-import org.elasticsearch.index.mapper.DocumentMapper;
-import org.elasticsearch.index.mapper.FieldMapper;
-import org.elasticsearch.index.mapper.MappedFieldType;
-import org.elasticsearch.index.mapper.MapperService;
-import org.elasticsearch.index.mapper.Mapping;
-import org.elasticsearch.index.mapper.ParsedDocument;
-import org.elasticsearch.index.mapper.Uid;
+import org.elasticsearch.index.mapper.*;
 import org.elasticsearch.index.mapper.internal.UidFieldMapper;
 import org.elasticsearch.index.percolator.stats.ShardPercolateService;
 import org.elasticsearch.index.query.ParsedQuery;
 import org.elasticsearch.index.shard.IndexShard;
 import org.elasticsearch.indices.IndicesService;
-import org.elasticsearch.percolator.QueryCollector.Count;
-import org.elasticsearch.percolator.QueryCollector.Match;
-import org.elasticsearch.percolator.QueryCollector.MatchAndScore;
-import org.elasticsearch.percolator.QueryCollector.MatchAndSort;
+import org.elasticsearch.percolator.QueryCollector.*;
 import org.elasticsearch.script.ScriptService;
 import org.elasticsearch.search.SearchParseElement;
 import org.elasticsearch.search.SearchShardTarget;
@@ -100,15 +86,14 @@ import java.util.List;
 import java.util.Map;
 
 import static org.elasticsearch.index.mapper.SourceToParse.source;
-import static org.elasticsearch.percolator.QueryCollector.count;
-import static org.elasticsearch.percolator.QueryCollector.match;
-import static org.elasticsearch.percolator.QueryCollector.matchAndScore;
+import static org.elasticsearch.percolator.QueryCollector.*;
 
 public class PercolatorService extends AbstractComponent {
 
     public final static float NO_SCORE = Float.NEGATIVE_INFINITY;
     public final static String TYPE_NAME = ".percolator";
 
+    private final IndexNameExpressionResolver indexNameExpressionResolver;
     private final IndicesService indicesService;
     private final IntObjectHashMap<PercolatorType> percolatorTypes;
     private final PageCacheRecycler pageCacheRecycler;
@@ -126,13 +111,17 @@ public class PercolatorService extends AbstractComponent {
 
     private final CloseableThreadLocal<MemoryIndex> cache;
 
+    private final ParseFieldMatcher parseFieldMatcher;
+
     @Inject
-    public PercolatorService(Settings settings, IndicesService indicesService,
+    public PercolatorService(Settings settings, IndexNameExpressionResolver indexNameExpressionResolver, IndicesService indicesService,
                              PageCacheRecycler pageCacheRecycler, BigArrays bigArrays,
                              HighlightPhase highlightPhase, ClusterService clusterService,
                              AggregationPhase aggregationPhase, ScriptService scriptService,
                              MappingUpdatedAction mappingUpdatedAction) {
         super(settings);
+        this.indexNameExpressionResolver = indexNameExpressionResolver;
+        this.parseFieldMatcher = new ParseFieldMatcher(settings);
         this.indicesService = indicesService;
         this.pageCacheRecycler = pageCacheRecycler;
         this.bigArrays = bigArrays;
@@ -178,7 +167,10 @@ public class PercolatorService extends AbstractComponent {
         shardPercolateService.prePercolate();
         long startTime = System.nanoTime();
 
-        String[] filteringAliases = clusterService.state().getMetaData().filteringAliases(
+        // TODO: The filteringAliases should be looked up at the coordinating node and serialized with all shard request,
+        // just like is done in other apis.
+        String[] filteringAliases = indexNameExpressionResolver.filteringAliases(
+                clusterService.state(),
                 indexShard.shardId().index().name(),
                 request.indices()
         );
@@ -186,16 +178,17 @@ public class PercolatorService extends AbstractComponent {
 
         SearchShardTarget searchShardTarget = new SearchShardTarget(clusterService.localNode().id(), request.shardId().getIndex(), request.shardId().id());
         final PercolateContext context = new PercolateContext(
-                request, searchShardTarget, indexShard, percolateIndexService, pageCacheRecycler, bigArrays, scriptService, aliasFilter
+                request, searchShardTarget, indexShard, percolateIndexService, pageCacheRecycler, bigArrays, scriptService, aliasFilter, parseFieldMatcher
         );
+        SearchContext.setCurrent(context);
         try {
-            ParsedDocument parsedDocument = parseRequest(percolateIndexService, request, context);
+            ParsedDocument parsedDocument = parseRequest(percolateIndexService, request, context, request.shardId().getIndex());
             if (context.percolateQueries().isEmpty()) {
                 return new PercolateShardResponse(context, request.shardId());
             }
 
             if (request.docSource() != null && request.docSource().length() != 0) {
-                parsedDocument = parseFetchedDoc(context, request.docSource(), percolateIndexService, request.documentType());
+                parsedDocument = parseFetchedDoc(context, request.docSource(), percolateIndexService, request.shardId().getIndex(), request.documentType());
             } else if (parsedDocument == null) {
                 throw new IllegalArgumentException("Nothing to percolate");
             }
@@ -243,12 +236,13 @@ public class PercolatorService extends AbstractComponent {
             percolatorIndex.prepare(context, parsedDocument);
             return action.doPercolate(request, context, isNested);
         } finally {
+            SearchContext.removeCurrent();
             context.close();
             shardPercolateService.postPercolate(System.nanoTime() - startTime);
         }
     }
 
-    private ParsedDocument parseRequest(IndexService documentIndexService, PercolateShardRequest request, PercolateContext context) {
+    private ParsedDocument parseRequest(IndexService documentIndexService, PercolateShardRequest request, PercolateContext context, String index) {
         BytesReference source = request.source();
         if (source == null || source.length() == 0) {
             return null;
@@ -266,7 +260,6 @@ public class PercolatorService extends AbstractComponent {
         // not the in memory percolate doc
         String[] previousTypes = context.types();
         context.types(new String[]{TYPE_NAME});
-        SearchContext.setCurrent(context);
         try {
             parser = XContentFactory.xContent(source).createParser(source);
             String currentFieldName = null;
@@ -283,7 +276,7 @@ public class PercolatorService extends AbstractComponent {
 
                         MapperService mapperService = documentIndexService.mapperService();
                         Tuple<DocumentMapper, Mapping> docMapper = mapperService.documentMapperWithAutoCreate(request.documentType());
-                        doc = docMapper.v1().parse(source(parser).type(request.documentType()).flyweight(true));
+                        doc = docMapper.v1().parse(source(parser).index(index).type(request.documentType()).flyweight(true));
                         if (docMapper.v2() != null) {
                             doc.addDynamicMappingsUpdate(docMapper.v2());
                         }
@@ -325,7 +318,7 @@ public class PercolatorService extends AbstractComponent {
                     if ("size".equals(currentFieldName)) {
                         context.size(parser.intValue());
                         if (context.size() < 0) {
-                            throw new ElasticsearchParseException("size is set to [" + context.size() + "] and is expected to be higher or equal to 0");
+                            throw new ElasticsearchParseException("size is set to [{}] and is expected to be higher or equal to 0", context.size());
                         }
                     } else if ("sort".equals(currentFieldName)) {
                         parseSort(parser, context);
@@ -367,7 +360,6 @@ public class PercolatorService extends AbstractComponent {
             throw new ElasticsearchParseException("failed to parse request", e);
         } finally {
             context.types(previousTypes);
-            SearchContext.removeCurrent();
             if (parser != null) {
                 parser.close();
             }
@@ -386,14 +378,14 @@ public class PercolatorService extends AbstractComponent {
         }
     }
 
-    private ParsedDocument parseFetchedDoc(PercolateContext context, BytesReference fetchedDoc, IndexService documentIndexService, String type) {
+    private ParsedDocument parseFetchedDoc(PercolateContext context, BytesReference fetchedDoc, IndexService documentIndexService, String index, String type) {
         ParsedDocument doc = null;
         XContentParser parser = null;
         try {
             parser = XContentFactory.xContent(fetchedDoc).createParser(fetchedDoc);
             MapperService mapperService = documentIndexService.mapperService();
             Tuple<DocumentMapper, Mapping> docMapper = mapperService.documentMapperWithAutoCreate(type);
-            doc = docMapper.v1().parse(source(parser).type(type).flyweight(true));
+            doc = docMapper.v1().parse(source(parser).index(index).type(type).flyweight(true));
 
             if (context.highlight() != null) {
                 doc.setSource(fetchedDoc);

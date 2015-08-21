@@ -36,6 +36,7 @@ import org.elasticsearch.cluster.ClusterService;
 import org.elasticsearch.cluster.ClusterState;
 import org.elasticsearch.cluster.action.index.MappingUpdatedAction;
 import org.elasticsearch.cluster.action.shard.ShardStateAction;
+import org.elasticsearch.cluster.metadata.IndexNameExpressionResolver;
 import org.elasticsearch.cluster.metadata.MappingMetaData;
 import org.elasticsearch.cluster.routing.ShardIterator;
 import org.elasticsearch.common.bytes.BytesReference;
@@ -78,9 +79,10 @@ public class TransportShardBulkAction extends TransportReplicationAction<BulkSha
     @Inject
     public TransportShardBulkAction(Settings settings, TransportService transportService, ClusterService clusterService,
                                     IndicesService indicesService, ThreadPool threadPool, ShardStateAction shardStateAction,
-                                    MappingUpdatedAction mappingUpdatedAction, UpdateHelper updateHelper, ActionFilters actionFilters) {
+                                    MappingUpdatedAction mappingUpdatedAction, UpdateHelper updateHelper, ActionFilters actionFilters,
+                                    IndexNameExpressionResolver indexNameExpressionResolver) {
         super(settings, ACTION_NAME, transportService, clusterService, indicesService, threadPool, shardStateAction, mappingUpdatedAction,
-                actionFilters,
+                actionFilters, indexNameExpressionResolver,
                 BulkShardRequest.class, BulkShardRequest.class, ThreadPool.Names.BULK);
         this.updateHelper = updateHelper;
         this.allowIdGeneration = settings.getAsBoolean("action.allow_id_generation", true);
@@ -455,7 +457,7 @@ public class TransportShardBulkAction extends TransportReplicationAction<BulkSha
             if (item.request() instanceof IndexRequest) {
                 IndexRequest indexRequest = (IndexRequest) item.request();
                 try {
-                    SourceToParse sourceToParse = SourceToParse.source(SourceToParse.Origin.REPLICA, indexRequest.source()).type(indexRequest.type()).id(indexRequest.id())
+                    SourceToParse sourceToParse = SourceToParse.source(SourceToParse.Origin.REPLICA, indexRequest.source()).index(shardId.getIndex()).type(indexRequest.type()).id(indexRequest.id())
                             .routing(indexRequest.routing()).parent(indexRequest.parent()).timestamp(indexRequest.timestamp()).ttl(indexRequest.ttl());
 
                     final Engine.IndexingOperation operation;

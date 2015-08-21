@@ -30,24 +30,24 @@ import org.elasticsearch.env.EnvironmentModule;
 import org.elasticsearch.index.Index;
 import org.elasticsearch.index.IndexNameModule;
 import org.elasticsearch.index.settings.IndexSettingsModule;
-import org.elasticsearch.indices.analysis.IndicesAnalysisModule;
 import org.elasticsearch.indices.analysis.IndicesAnalysisService;
-import org.elasticsearch.test.ElasticsearchTokenStreamTestCase;
+import org.elasticsearch.test.ESTokenStreamTestCase;
 import org.junit.Test;
 
 import static org.elasticsearch.common.settings.Settings.settingsBuilder;
 
-public class StopAnalyzerTests extends ElasticsearchTokenStreamTestCase {
+public class StopAnalyzerTests extends ESTokenStreamTestCase {
 
     @Test
     public void testDefaultsCompoundAnalysis() throws Exception {
+        String json = "/org/elasticsearch/index/analysis/stop.json";
         Index index = new Index("test");
         Settings settings = settingsBuilder()
-                .loadFromClasspath("org/elasticsearch/index/analysis/stop.json")
+            .loadFromStream(json, getClass().getResourceAsStream(json))
                 .put("path.home", createTempDir().toString())
                 .put(IndexMetaData.SETTING_VERSION_CREATED, Version.CURRENT)
                 .build();
-        Injector parentInjector = new ModulesBuilder().add(new SettingsModule(settings), new EnvironmentModule(new Environment(settings)), new IndicesAnalysisModule()).createInjector();
+        Injector parentInjector = new ModulesBuilder().add(new SettingsModule(settings), new EnvironmentModule(new Environment(settings))).createInjector();
         Injector injector = new ModulesBuilder().add(
                 new IndexSettingsModule(index, settings),
                 new IndexNameModule(index),

@@ -19,6 +19,7 @@
 package org.elasticsearch.common.util.concurrent;
 
 import com.google.common.collect.Lists;
+
 import org.elasticsearch.common.Priority;
 import org.elasticsearch.common.unit.TimeValue;
 
@@ -40,8 +41,8 @@ public class PrioritizedEsThreadPoolExecutor extends EsThreadPoolExecutor {
     private AtomicLong insertionOrder = new AtomicLong();
     private Queue<Runnable> current = ConcurrentCollections.newQueue();
 
-    PrioritizedEsThreadPoolExecutor(int corePoolSize, int maximumPoolSize, long keepAliveTime, TimeUnit unit, ThreadFactory threadFactory) {
-        super(corePoolSize, maximumPoolSize, keepAliveTime, unit, new PriorityBlockingQueue<Runnable>(), threadFactory);
+    PrioritizedEsThreadPoolExecutor(String name, int corePoolSize, int maximumPoolSize, long keepAliveTime, TimeUnit unit, ThreadFactory threadFactory) {
+        super(name, corePoolSize, maximumPoolSize, keepAliveTime, unit, new PriorityBlockingQueue<Runnable>(), threadFactory);
     }
 
     public Pending[] getPending() {
@@ -105,6 +106,7 @@ public class PrioritizedEsThreadPoolExecutor extends EsThreadPoolExecutor {
         } else if (!(command instanceof PrioritizedFutureTask)) { // it might be a callable wrapper...
             command = new TieBreakingPrioritizedRunnable(command, Priority.NORMAL, insertionOrder.incrementAndGet());
         }
+        super.execute(command);
         if (timeout.nanos() >= 0) {
             if (command instanceof TieBreakingPrioritizedRunnable) {
                 ((TieBreakingPrioritizedRunnable) command).scheduleTimeout(timer, timeoutCallback, timeout);
@@ -114,7 +116,6 @@ public class PrioritizedEsThreadPoolExecutor extends EsThreadPoolExecutor {
                 throw new UnsupportedOperationException("Execute with timeout is not supported for future tasks");
             }
         }
-        super.execute(command);
     }
 
     @Override
@@ -161,7 +162,10 @@ public class PrioritizedEsThreadPoolExecutor extends EsThreadPoolExecutor {
 
         private Runnable runnable;
         private final long insertionOrder;
+
+        // these two variables are protected by 'this'
         private ScheduledFuture<?> timeoutFuture;
+        private boolean started = false;
 
         TieBreakingPrioritizedRunnable(PrioritizedRunnable runnable, long insertionOrder) {
             this(runnable, runnable.priority(), insertionOrder);
@@ -175,7 +179,12 @@ public class PrioritizedEsThreadPoolExecutor extends EsThreadPoolExecutor {
 
         @Override
         public void run() {
-            FutureUtils.cancel(timeoutFuture);
+            synchronized (this) {
+                // make the task as stared. This is needed for synchronization with the timeout handling
+                // see  #scheduleTimeout()
+                started = true;
+                FutureUtils.cancel(timeoutFuture);
+            }
             runAndClean(runnable);
         }
 
@@ -189,14 +198,21 @@ public class PrioritizedEsThreadPoolExecutor extends EsThreadPoolExecutor {
         }
 
         public void scheduleTimeout(ScheduledExecutorService timer, final Runnable timeoutCallback, TimeValue timeValue) {
-            timeoutFuture = timer.schedule(new Runnable() {
-                @Override
-                public void run() {
-                    if (remove(TieBreakingPrioritizedRunnable.this)) {
-                        runAndClean(timeoutCallback);
-                    }
+            synchronized (this) {
+                if (timeoutFuture != null) {
+                    throw new IllegalStateException("scheduleTimeout may only be called once");
                 }
-            }, timeValue.nanos(), TimeUnit.NANOSECONDS);
+                if (started == false) {
+                    timeoutFuture = timer.schedule(new Runnable() {
+                        @Override
+                        public void run() {
+                            if (remove(TieBreakingPrioritizedRunnable.this)) {
+                                runAndClean(timeoutCallback);
+                            }
+                        }
+                    }, timeValue.nanos(), TimeUnit.NANOSECONDS);
+                }
+            }
         }
 
         /**

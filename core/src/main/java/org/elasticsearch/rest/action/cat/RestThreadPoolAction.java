@@ -112,7 +112,7 @@ public class RestThreadPoolAction extends AbstractCatAction {
     }
 
     @Override
-    void documentation(StringBuilder sb) {
+    protected void documentation(StringBuilder sb) {
         sb.append("/_cat/thread_pool\n");
     }
 
@@ -146,7 +146,7 @@ public class RestThreadPoolAction extends AbstractCatAction {
     }
 
     @Override
-    Table getTableWithHeader(final RestRequest request) {
+    protected Table getTableWithHeader(final RestRequest request) {
         Table table = new Table();
         table.startHeaders();
         table.addCell("id", "default:false;alias:nodeId;desc:unique node id");
@@ -229,7 +229,7 @@ public class RestThreadPoolAction extends AbstractCatAction {
             table.startRow();
 
             table.addCell(fullId ? node.id() : Strings.substring(node.getId(), 0, 4));
-            table.addCell(info == null ? null : info.getProcess().id());
+            table.addCell(info == null ? null : info.getProcess().getId());
             table.addCell(node.getHostName());
             table.addCell(node.getHostAddress());
             if (node.address() instanceof InetSocketTransportAddress) {

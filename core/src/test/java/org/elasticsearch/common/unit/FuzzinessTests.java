@@ -18,11 +18,10 @@
  */
 package org.elasticsearch.common.unit;
 
-import org.apache.lucene.util.LuceneTestCase;
 import org.elasticsearch.common.xcontent.XContent;
 import org.elasticsearch.common.xcontent.XContentParser;
 import org.elasticsearch.common.xcontent.XContentType;
-import org.elasticsearch.test.ElasticsearchTestCase;
+import org.elasticsearch.test.ESTestCase;
 import org.junit.Test;
 
 import java.io.IOException;
@@ -31,7 +30,7 @@ import static org.elasticsearch.common.xcontent.XContentFactory.jsonBuilder;
 import static org.hamcrest.CoreMatchers.*;
 import static org.hamcrest.number.IsCloseTo.closeTo;
 
-public class FuzzinessTests extends ElasticsearchTestCase {
+public class FuzzinessTests extends ESTestCase {
 
     @Test
     public void testNumerics() {
@@ -143,16 +142,6 @@ public class FuzzinessTests extends ElasticsearchTestCase {
     public void testAuto() {
         final int codePoints = randomIntBetween(0, 10);
         String string = randomRealisticUnicodeOfCodepointLength(codePoints);
-        if (codePoints <= 2) {
-            assertThat(Fuzziness.AUTO.asDistance(string), equalTo(0));
-            assertThat(Fuzziness.fromSimilarity(Fuzziness.AUTO.asSimilarity(string)).asDistance(string), equalTo(0));
-        } else if (codePoints > 5) {
-            assertThat(Fuzziness.AUTO.asDistance(string), equalTo(2));
-            assertThat(Fuzziness.fromSimilarity(Fuzziness.AUTO.asSimilarity(string)).asDistance(string), equalTo(2));
-        } else {
-            assertThat(Fuzziness.AUTO.asDistance(string), equalTo(1));
-            assertThat(Fuzziness.fromSimilarity(Fuzziness.AUTO.asSimilarity(string)).asDistance(string), equalTo(1));
-        }
         assertThat(Fuzziness.AUTO.asByte(), equalTo((byte) 1));
         assertThat(Fuzziness.AUTO.asInt(), equalTo(1));
         assertThat(Fuzziness.AUTO.asFloat(), equalTo(1f));
@@ -173,28 +162,4 @@ public class FuzzinessTests extends ElasticsearchTestCase {
         }
     }
 
-    @Test
-    @LuceneTestCase.AwaitsFix(bugUrl = "https://github.com/elastic/elasticsearch/issues/10638")
-    public void testSimilarityToDistance() {
-        assertThat(Fuzziness.fromSimilarity(0.5f).asDistance("ab"), equalTo(1));
-        assertThat(Fuzziness.fromSimilarity(0.66f).asDistance("abcefg"), equalTo(2));
-        assertThat(Fuzziness.fromSimilarity(0.8f).asDistance("ab"), equalTo(0));
-        assertThat(Fuzziness.fromSimilarity(0.8f).asDistance("abcefg"), equalTo(1));
-        assertThat((double) Fuzziness.ONE.asSimilarity("abcefg"), closeTo(0.8f, 0.05));
-        assertThat((double) Fuzziness.TWO.asSimilarity("abcefg"), closeTo(0.66f, 0.05));
-        assertThat((double) Fuzziness.ONE.asSimilarity("ab"), closeTo(0.5f, 0.05));
-
-        int iters = randomIntBetween(100, 1000);
-        for (int i = 0; i < iters; i++) {
-            Fuzziness fuzziness = Fuzziness.fromEdits(between(1, 2));
-            String string = rarely() ? randomRealisticUnicodeOfLengthBetween(2, 4) :
-                    randomRealisticUnicodeOfLengthBetween(4, 10);
-            float similarity = fuzziness.asSimilarity(string);
-            if (similarity != 0.0f) {
-                Fuzziness similarityBased = Fuzziness.build(similarity);
-                assertThat((double) similarityBased.asSimilarity(string), closeTo(similarity, 0.05));
-                assertThat(similarityBased.asDistance(string), equalTo(Math.min(2, fuzziness.asDistance(string))));
-            }
-        }
-    }
 }

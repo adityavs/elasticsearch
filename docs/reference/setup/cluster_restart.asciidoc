@@ -14,7 +14,7 @@ replicate the shards that were on that node to other nodes in the cluster,
 causing a lot of wasted I/O.  This can be avoided by disabling allocation
 before shutting down a node:
 
-[source,json]
+[source,js]
 --------------------------------------------------
 PUT /_cluster/settings
 {
@@ -27,7 +27,7 @@ PUT /_cluster/settings
 
 If upgrading from 0.90.x to 1.x, then use these settings instead:
 
-[source,json]
+[source,js]
 --------------------------------------------------
 PUT /_cluster/settings
 {
@@ -40,8 +40,6 @@ PUT /_cluster/settings
 // AUTOSENSE
 
 ==== Step 2: Perform a synced flush
-
-added[1.6.0,Synced flush is only supported in Elasticsearch 1.6.0 and above]
 
 Shard recovery will be much faster if you stop indexing and issue a
 <<indices-synced-flush, synced-flush>> request:
@@ -103,7 +101,7 @@ allows the master to allocate replicas to nodes which already have local shard
 copies.   At this point, with all the nodes in the cluster, it is safe to
 reenable shard allocation:
 
-[source,json]
+[source,js]
 ------------------------------------------------------
 PUT /_cluster/settings
 {
@@ -116,7 +114,7 @@ PUT /_cluster/settings
 
 If upgrading from 0.90.x to 1.x, then use these settings instead:
 
-[source,json]
+[source,js]
 --------------------------------------------------
 PUT /_cluster/settings
 {

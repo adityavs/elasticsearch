@@ -39,7 +39,7 @@ import org.elasticsearch.index.mapper.core.LongFieldMapper;
 import org.elasticsearch.index.mapper.core.StringFieldMapper;
 import org.elasticsearch.index.mapper.core.TokenCountFieldMapper;
 import org.elasticsearch.index.mapper.geo.GeoPointFieldMapper;
-import org.elasticsearch.test.ElasticsearchSingleNodeTest;
+import org.elasticsearch.test.ESSingleNodeTestCase;
 import org.junit.Test;
 
 import java.util.Arrays;
@@ -47,8 +47,8 @@ import java.util.Collections;
 import java.util.Map;
 import java.util.TreeMap;
 
-import static org.elasticsearch.common.io.Streams.copyToBytesFromClasspath;
-import static org.elasticsearch.common.io.Streams.copyToStringFromClasspath;
+import static org.elasticsearch.test.StreamsUtils.copyToBytesFromClasspath;
+import static org.elasticsearch.test.StreamsUtils.copyToStringFromClasspath;
 import static org.elasticsearch.common.xcontent.XContentFactory.jsonBuilder;
 import static org.elasticsearch.index.mapper.MapperBuilders.doc;
 import static org.elasticsearch.index.mapper.MapperBuilders.rootObject;
@@ -60,7 +60,7 @@ import static org.hamcrest.Matchers.notNullValue;
 /**
  *
  */
-public class MultiFieldTests extends ElasticsearchSingleNodeTest {
+public class MultiFieldTests extends ESSingleNodeTestCase {
 
     @Test
     public void testMultiField_multiFieldType() throws Exception {
@@ -77,7 +77,7 @@ public class MultiFieldTests extends ElasticsearchSingleNodeTest {
     private void testMultiField(String mapping) throws Exception {
         DocumentMapper docMapper = createIndex("test").mapperService().documentMapperParser().parse(mapping);
         BytesReference json = new BytesArray(copyToBytesFromClasspath("/org/elasticsearch/index/mapper/multifield/test-data.json"));
-        Document doc = docMapper.parse("person", "1", json).rootDoc();
+        Document doc = docMapper.parse("test", "person", "1", json).rootDoc();
 
         IndexableField f = doc.getField("name");
         assertThat(f.name(), equalTo("name"));
@@ -151,7 +151,7 @@ public class MultiFieldTests extends ElasticsearchSingleNodeTest {
         Settings settings = indexService.settingsService().getSettings();
         DocumentMapperParser mapperParser = indexService.mapperService().documentMapperParser();
 
-        DocumentMapper builderDocMapper = doc("test", settings, rootObject("person").add(
+        DocumentMapper builderDocMapper = doc(settings, rootObject("person").add(
                 stringField("name").store(true)
                         .addMultiField(stringField("indexed").index(true).tokenized(true))
                         .addMultiField(stringField("not_indexed").index(false).store(true))
@@ -164,7 +164,7 @@ public class MultiFieldTests extends ElasticsearchSingleNodeTest {
 
 
         BytesReference json = new BytesArray(copyToBytesFromClasspath("/org/elasticsearch/index/mapper/multifield/test-data.json"));
-        Document doc = docMapper.parse("person", "1", json).rootDoc();
+        Document doc = docMapper.parse("test", "person", "1", json).rootDoc();
 
         IndexableField f = doc.getField("name");
         assertThat(f.name(), equalTo("name"));
@@ -191,7 +191,7 @@ public class MultiFieldTests extends ElasticsearchSingleNodeTest {
         String mapping = copyToStringFromClasspath("/org/elasticsearch/index/mapper/multifield/test-multi-field-type-no-default-field.json");
         DocumentMapper docMapper = createIndex("test").mapperService().documentMapperParser().parse(mapping);
         BytesReference json = new BytesArray(copyToBytesFromClasspath("/org/elasticsearch/index/mapper/multifield/test-data.json"));
-        Document doc = docMapper.parse("person", "1", json).rootDoc();
+        Document doc = docMapper.parse("test", "person", "1", json).rootDoc();
 
         assertNull(doc.getField("name"));
         IndexableField f = doc.getField("name.indexed");
@@ -276,7 +276,7 @@ public class MultiFieldTests extends ElasticsearchSingleNodeTest {
         BytesReference json = jsonBuilder().startObject()
                 .field("a", "-1,-1")
                 .endObject().bytes();
-        Document doc = docMapper.parse("type", "1", json).rootDoc();
+        Document doc = docMapper.parse("test", "type", "1", json).rootDoc();
 
         IndexableField f = doc.getField("a");
         assertThat(f, notNullValue());
@@ -307,7 +307,7 @@ public class MultiFieldTests extends ElasticsearchSingleNodeTest {
         json = jsonBuilder().startObject()
                 .field("b", "-1,-1")
                 .endObject().bytes();
-        doc = docMapper.parse("type", "1", json).rootDoc();
+        doc = docMapper.parse("test", "type", "1", json).rootDoc();
 
         f = doc.getField("b");
         assertThat(f, notNullValue());
@@ -326,7 +326,7 @@ public class MultiFieldTests extends ElasticsearchSingleNodeTest {
         json = jsonBuilder().startObject()
                 .startArray("b").startArray().value(-1).value(-1).endArray().startArray().value(-2).value(-2).endArray().endArray()
                 .endObject().bytes();
-        doc = docMapper.parse("type", "1", json).rootDoc();
+        doc = docMapper.parse("test", "type", "1", json).rootDoc();
 
         f = doc.getFields("b")[0];
         assertThat(f, notNullValue());
@@ -373,7 +373,7 @@ public class MultiFieldTests extends ElasticsearchSingleNodeTest {
         BytesReference json = jsonBuilder().startObject()
                 .field("a", "complete me")
                 .endObject().bytes();
-        Document doc = docMapper.parse("type", "1", json).rootDoc();
+        Document doc = docMapper.parse("test", "type", "1", json).rootDoc();
 
         IndexableField f = doc.getField("a");
         assertThat(f, notNullValue());
@@ -404,7 +404,7 @@ public class MultiFieldTests extends ElasticsearchSingleNodeTest {
         json = jsonBuilder().startObject()
                 .field("b", "complete me")
                 .endObject().bytes();
-        doc = docMapper.parse("type", "1", json).rootDoc();
+        doc = docMapper.parse("test", "type", "1", json).rootDoc();
 
         f = doc.getField("b");
         assertThat(f, notNullValue());

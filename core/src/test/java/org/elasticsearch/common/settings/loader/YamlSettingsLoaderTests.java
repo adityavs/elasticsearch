@@ -20,22 +20,23 @@
 package org.elasticsearch.common.settings.loader;
 
 import org.elasticsearch.common.settings.Settings;
-import org.elasticsearch.test.ElasticsearchTestCase;
+import org.elasticsearch.common.settings.SettingsException;
+import org.elasticsearch.test.ESTestCase;
 import org.junit.Test;
 
 import static org.elasticsearch.common.settings.Settings.settingsBuilder;
-import static org.hamcrest.MatcherAssert.assertThat;
 import static org.hamcrest.Matchers.equalTo;
 
 /**
  *
  */
-public class YamlSettingsLoaderTests extends ElasticsearchTestCase {
+public class YamlSettingsLoaderTests extends ESTestCase {
 
     @Test
     public void testSimpleYamlSettings() throws Exception {
+        String yaml = "/org/elasticsearch/common/settings/loader/test-settings.yml";
         Settings settings = settingsBuilder()
-                .loadFromClasspath("org/elasticsearch/common/settings/loader/test-settings.yml")
+                .loadFromStream(yaml, getClass().getResourceAsStream(yaml))
                 .build();
 
         assertThat(settings.get("test1.value1"), equalTo("value1"));
@@ -48,5 +49,21 @@ public class YamlSettingsLoaderTests extends ElasticsearchTestCase {
         assertThat(settings.getAsArray("test1.test3").length, equalTo(2));
         assertThat(settings.getAsArray("test1.test3")[0], equalTo("test3-1"));
         assertThat(settings.getAsArray("test1.test3")[1], equalTo("test3-2"));
+    }
+
+    @Test(expected = SettingsException.class)
+    public void testIndentation() {
+        String yaml = "/org/elasticsearch/common/settings/loader/indentation-settings.yml";
+        settingsBuilder()
+            .loadFromStream(yaml, getClass().getResourceAsStream(yaml))
+            .build();
+    }
+
+    @Test(expected = SettingsException.class)
+    public void testIndentationWithExplicitDocumentStart() {
+        String yaml = "/org/elasticsearch/common/settings/loader/indentation-with-explicit-document-start-settings.yml";
+        settingsBuilder()
+                .loadFromStream(yaml, getClass().getResourceAsStream(yaml))
+                .build();
     }
 }

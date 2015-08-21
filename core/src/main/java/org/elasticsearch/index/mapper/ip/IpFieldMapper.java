@@ -20,10 +20,8 @@
 package org.elasticsearch.index.mapper.ip;
 
 import com.google.common.net.InetAddresses;
-
 import org.apache.lucene.analysis.NumericTokenStream;
 import org.apache.lucene.document.Field;
-import org.apache.lucene.document.FieldType.NumericType;
 import org.apache.lucene.index.IndexOptions;
 import org.apache.lucene.search.NumericRangeQuery;
 import org.apache.lucene.search.Query;
@@ -31,7 +29,6 @@ import org.apache.lucene.util.BytesRef;
 import org.apache.lucene.util.BytesRefBuilder;
 import org.apache.lucene.util.NumericUtils;
 import org.elasticsearch.common.Explicit;
-import org.elasticsearch.common.Nullable;
 import org.elasticsearch.common.Numbers;
 import org.elasticsearch.common.Strings;
 import org.elasticsearch.common.settings.Settings;
@@ -45,13 +42,10 @@ import org.elasticsearch.index.fielddata.FieldDataType;
 import org.elasticsearch.index.mapper.MappedFieldType;
 import org.elasticsearch.index.mapper.Mapper;
 import org.elasticsearch.index.mapper.MapperParsingException;
-import org.elasticsearch.index.mapper.MergeMappingException;
-import org.elasticsearch.index.mapper.MergeResult;
 import org.elasticsearch.index.mapper.ParseContext;
+import org.elasticsearch.index.mapper.core.LongFieldMapper;
 import org.elasticsearch.index.mapper.core.LongFieldMapper.CustomLongNumericField;
 import org.elasticsearch.index.mapper.core.NumberFieldMapper;
-import org.elasticsearch.index.query.QueryParseContext;
-
 import java.io.IOException;
 import java.util.Iterator;
 import java.util.List;
@@ -119,8 +113,8 @@ public class IpFieldMapper extends NumberFieldMapper {
         @Override
         public IpFieldMapper build(BuilderContext context) {
             setupFieldType(context);
-            IpFieldMapper fieldMapper = new IpFieldMapper(fieldType, docValues, ignoreMalformed(context), coerce(context),
-                    fieldDataSettings, context.indexSettings(), multiFieldsBuilder.build(this, context), copyTo);
+            IpFieldMapper fieldMapper = new IpFieldMapper(name, fieldType, defaultFieldType, ignoreMalformed(context), coerce(context),
+                    context.indexSettings(), multiFieldsBuilder.build(this, context), copyTo);
             fieldMapper.includeInAll(includeInAll);
             return fieldMapper;
         }
@@ -158,10 +152,10 @@ public class IpFieldMapper extends NumberFieldMapper {
         }
     }
 
-    public static final class IpFieldType extends NumberFieldType {
+    public static final class IpFieldType extends LongFieldMapper.LongFieldType {
 
         public IpFieldType() {
-            super(NumericType.LONG);
+            setFieldDataType(new FieldDataType("long"));
         }
 
         protected IpFieldType(IpFieldType ref) {
@@ -212,7 +206,7 @@ public class IpFieldMapper extends NumberFieldMapper {
         }
 
         @Override
-        public Query rangeQuery(Object lowerTerm, Object upperTerm, boolean includeLower, boolean includeUpper, @Nullable QueryParseContext context) {
+        public Query rangeQuery(Object lowerTerm, Object upperTerm, boolean includeLower, boolean includeUpper) {
             return NumericRangeQuery.newLongRange(names().indexName(), numericPrecisionStep(),
                 lowerTerm == null ? null : parseValue(lowerTerm),
                 upperTerm == null ? null : parseValue(upperTerm),
@@ -220,8 +214,8 @@ public class IpFieldMapper extends NumberFieldMapper {
         }
 
         @Override
-        public Query fuzzyQuery(String value, Fuzziness fuzziness, int prefixLength, int maxExpansions, boolean transpositions) {
-            long iValue = ipToLong(value);
+        public Query fuzzyQuery(Object value, Fuzziness fuzziness, int prefixLength, int maxExpansions, boolean transpositions) {
+            long iValue = parseValue(value);
             long iSim;
             try {
                 iSim = ipToLong(fuzziness.asString());
@@ -235,22 +229,10 @@ public class IpFieldMapper extends NumberFieldMapper {
         }
     }
 
-    protected IpFieldMapper(MappedFieldType fieldType, Boolean docValues,
+    protected IpFieldMapper(String simpleName, MappedFieldType fieldType, MappedFieldType defaultFieldType,
                             Explicit<Boolean> ignoreMalformed, Explicit<Boolean> coerce,
-                            @Nullable Settings fieldDataSettings,
                             Settings indexSettings, MultiFields multiFields, CopyTo copyTo) {
-        super(fieldType, docValues, ignoreMalformed, coerce,
-              fieldDataSettings, indexSettings, multiFields, copyTo);
-    }
-
-    @Override
-    public MappedFieldType defaultFieldType() {
-        return Defaults.FIELD_TYPE;
-    }
-
-    @Override
-    public FieldDataType defaultFieldDataType() {
-        return new FieldDataType("long");
+        super(simpleName, fieldType, defaultFieldType, ignoreMalformed, coerce, indexSettings, multiFields, copyTo);
     }
 
     private static long parseValue(Object value) {
@@ -288,7 +270,7 @@ public class IpFieldMapper extends NumberFieldMapper {
 
         final long value = ipToLong(ipAsString);
         if (fieldType().indexOptions() != IndexOptions.NONE || fieldType().stored()) {
-            CustomLongNumericField field = new CustomLongNumericField(this, value, fieldType());
+            CustomLongNumericField field = new CustomLongNumericField(value, fieldType());
             field.setBoost(fieldType().boost());
             fields.add(field);
         }

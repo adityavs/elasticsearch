@@ -24,7 +24,9 @@ import com.google.common.collect.ImmutableMap;
 import com.google.common.collect.Iterators;
 
 import org.apache.lucene.util.IOUtils;
+import org.elasticsearch.ElasticsearchException;
 import org.elasticsearch.cluster.metadata.IndexMetaData;
+import org.elasticsearch.cluster.routing.ShardRouting;
 import org.elasticsearch.common.Nullable;
 import org.elasticsearch.common.Strings;
 import org.elasticsearch.common.collect.Tuple;
@@ -173,10 +175,10 @@ public class IndexService extends AbstractIndexComponent implements IndexCompone
     /**
      * Return the shard with the provided id, or throw an exception if it doesn't exist.
      */
-    public IndexShard shardSafe(int shardId) throws IndexShardMissingException {
+    public IndexShard shardSafe(int shardId) {
         IndexShard indexShard = shard(shardId);
         if (indexShard == null) {
-            throw new IndexShardMissingException(new ShardId(index, shardId));
+            throw new ShardNotFoundException(new ShardId(index, shardId));
         }
         return indexShard;
     }
@@ -242,16 +244,16 @@ public class IndexService extends AbstractIndexComponent implements IndexCompone
     /**
      * Return the shard injector for the provided id, or throw an exception if there is no such shard.
      */
-    public Injector shardInjectorSafe(int shardId) throws IndexShardMissingException {
+    public Injector shardInjectorSafe(int shardId)  {
         Tuple<IndexShard, Injector> tuple = shards.get(shardId);
         if (tuple == null) {
-            throw new IndexShardMissingException(new ShardId(index, shardId));
+            throw new ShardNotFoundException(new ShardId(index, shardId));
         }
         return tuple.v2();
     }
 
     public String indexUUID() {
-        return indexSettings.get(IndexMetaData.SETTING_UUID, IndexMetaData.INDEX_UUID_NA_VALUE);
+        return indexSettings.get(IndexMetaData.SETTING_INDEX_UUID, IndexMetaData.INDEX_UUID_NA_VALUE);
     }
 
     // NOTE: O(numShards) cost, but numShards should be smallish?
@@ -269,7 +271,8 @@ public class IndexService extends AbstractIndexComponent implements IndexCompone
         }
     }
 
-    public synchronized IndexShard createShard(int sShardId, boolean primary) {
+    public synchronized IndexShard createShard(int sShardId, ShardRouting routing) {
+        final boolean primary = routing.primary();
         /*
          * TODO: we execute this in parallel but it's a synced method. Yet, we might
          * be able to serialize the execution via the cluster state in the future. for now we just
@@ -283,16 +286,27 @@ public class IndexService extends AbstractIndexComponent implements IndexCompone
         boolean success = false;
         Injector shardInjector = null;
         try {
-
-            ShardPath path = ShardPath.loadShardPath(logger, nodeEnv, shardId, indexSettings);
+            lock = nodeEnv.shardLock(shardId, TimeUnit.SECONDS.toMillis(5));
+            ShardPath path;
+            try {
+                path = ShardPath.loadShardPath(logger, nodeEnv, shardId, indexSettings);
+            } catch (IllegalStateException ex) {
+                logger.warn("{} failed to load shard path, trying to remove leftover", shardId);
+                try {
+                    ShardPath.deleteLeftoverShardDirectory(logger, nodeEnv, lock, indexSettings);
+                    path = ShardPath.loadShardPath(logger, nodeEnv, shardId, indexSettings);
+                } catch (Throwable t) {
+                    t.addSuppressed(ex);
+                    throw t;
+                }
+            }
             if (path == null) {
-                path = ShardPath.selectNewPathForShard(nodeEnv, shardId, indexSettings, getAvgShardSizeInBytes(), this);
+                path = ShardPath.selectNewPathForShard(nodeEnv, shardId, indexSettings, routing.getExpectedShardSize() == ShardRouting.UNAVAILABLE_EXPECTED_SHARD_SIZE ? getAvgShardSizeInBytes() : routing.getExpectedShardSize(), this);
                 logger.debug("{} creating using a new path [{}]", shardId, path);
             } else {
                 logger.debug("{} creating using an existing path [{}]", shardId, path);
             }
 
-            lock = nodeEnv.shardLock(shardId, TimeUnit.SECONDS.toMillis(5));
             if (shards.containsKey(shardId.id())) {
                 throw new IndexShardAlreadyExistsException(shardId + " already exists");
             }
@@ -312,13 +326,17 @@ public class IndexService extends AbstractIndexComponent implements IndexCompone
                             injector.getInstance(IndicesQueryCache.class).onClose(shardId);
                         }
                     }), path));
-            modules.add(new DeletionPolicyModule(indexSettings));
+            modules.add(new DeletionPolicyModule());
             try {
                 shardInjector = modules.createChildInjector(injector);
             } catch (CreationException e) {
-                throw new IndexShardCreationException(shardId, Injectors.getFirstErrorFailure(e));
+                ElasticsearchException ex = new ElasticsearchException("failed to create shard", Injectors.getFirstErrorFailure(e));
+                ex.setShard(shardId);
+                throw ex;
             } catch (Throwable e) {
-                throw new IndexShardCreationException(shardId, e);
+                ElasticsearchException ex = new ElasticsearchException("failed to create shard", e);
+                ex.setShard(shardId);
+                throw ex;
             }
 
             IndexShard indexShard = shardInjector.getInstance(IndexShard.class);
@@ -328,8 +346,10 @@ public class IndexService extends AbstractIndexComponent implements IndexCompone
             shards = newMapBuilder(shards).put(shardId.id(), new Tuple<>(indexShard, shardInjector)).immutableMap();
             success = true;
             return indexShard;
-        } catch (IOException ex) {
-            throw new IndexShardCreationException(shardId, ex);
+        } catch (IOException e) {
+            ElasticsearchException ex = new ElasticsearchException("failed to create shard", e);
+            ex.setShard(shardId);
+            throw ex;
         } finally {
             if (success == false) {
                 IOUtils.closeWhileHandlingException(lock);

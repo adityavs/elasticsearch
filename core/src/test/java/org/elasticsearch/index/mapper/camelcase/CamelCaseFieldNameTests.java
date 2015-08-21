@@ -23,13 +23,13 @@ import org.elasticsearch.common.xcontent.XContentFactory;
 import org.elasticsearch.index.IndexService;
 import org.elasticsearch.index.mapper.DocumentMapper;
 import org.elasticsearch.index.mapper.ParsedDocument;
-import org.elasticsearch.test.ElasticsearchSingleNodeTest;
+import org.elasticsearch.test.ESSingleNodeTestCase;
 import org.junit.Test;
 
 /**
  *
  */
-public class CamelCaseFieldNameTests extends ElasticsearchSingleNodeTest {
+public class CamelCaseFieldNameTests extends ESSingleNodeTestCase {
 
     @Test
     public void testCamelCaseFieldNameStaysAsIs() throws Exception {
@@ -40,7 +40,7 @@ public class CamelCaseFieldNameTests extends ElasticsearchSingleNodeTest {
         client().admin().indices().preparePutMapping("test").setType("type").setSource(mapping).get();
         DocumentMapper documentMapper = index.mapperService().documentMapper("type");
 
-        ParsedDocument doc = documentMapper.parse("type", "1", XContentFactory.jsonBuilder().startObject()
+        ParsedDocument doc = documentMapper.parse("test", "type", "1", XContentFactory.jsonBuilder().startObject()
                 .field("thisIsCamelCase", "value1")
                 .endObject().bytes());
 

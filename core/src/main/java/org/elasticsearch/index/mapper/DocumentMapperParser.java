@@ -20,10 +20,12 @@
 package org.elasticsearch.index.mapper;
 
 import com.google.common.collect.ImmutableMap;
+import com.google.common.collect.ImmutableSortedMap;
 import com.google.common.collect.Maps;
 
 import org.elasticsearch.Version;
 import org.elasticsearch.common.Nullable;
+import org.elasticsearch.common.ParseFieldMatcher;
 import org.elasticsearch.common.Strings;
 import org.elasticsearch.common.collect.MapBuilder;
 import org.elasticsearch.common.collect.Tuple;
@@ -35,38 +37,11 @@ import org.elasticsearch.common.settings.Settings;
 import org.elasticsearch.common.xcontent.XContentFactory;
 import org.elasticsearch.common.xcontent.XContentHelper;
 import org.elasticsearch.common.xcontent.XContentParser;
-import org.elasticsearch.index.AbstractIndexComponent;
-import org.elasticsearch.index.Index;
 import org.elasticsearch.index.analysis.AnalysisService;
-import org.elasticsearch.index.mapper.core.BinaryFieldMapper;
-import org.elasticsearch.index.mapper.core.BooleanFieldMapper;
-import org.elasticsearch.index.mapper.core.ByteFieldMapper;
-import org.elasticsearch.index.mapper.core.CompletionFieldMapper;
-import org.elasticsearch.index.mapper.core.DateFieldMapper;
-import org.elasticsearch.index.mapper.core.DoubleFieldMapper;
-import org.elasticsearch.index.mapper.core.FloatFieldMapper;
-import org.elasticsearch.index.mapper.core.IntegerFieldMapper;
-import org.elasticsearch.index.mapper.core.LongFieldMapper;
-import org.elasticsearch.index.mapper.core.Murmur3FieldMapper;
-import org.elasticsearch.index.mapper.core.ShortFieldMapper;
-import org.elasticsearch.index.mapper.core.StringFieldMapper;
-import org.elasticsearch.index.mapper.core.TokenCountFieldMapper;
-import org.elasticsearch.index.mapper.core.TypeParsers;
+import org.elasticsearch.index.mapper.core.*;
 import org.elasticsearch.index.mapper.geo.GeoPointFieldMapper;
 import org.elasticsearch.index.mapper.geo.GeoShapeFieldMapper;
-import org.elasticsearch.index.mapper.internal.AllFieldMapper;
-import org.elasticsearch.index.mapper.internal.FieldNamesFieldMapper;
-import org.elasticsearch.index.mapper.internal.IdFieldMapper;
-import org.elasticsearch.index.mapper.internal.IndexFieldMapper;
-import org.elasticsearch.index.mapper.internal.ParentFieldMapper;
-import org.elasticsearch.index.mapper.internal.RoutingFieldMapper;
-import org.elasticsearch.index.mapper.internal.SizeFieldMapper;
-import org.elasticsearch.index.mapper.internal.SourceFieldMapper;
-import org.elasticsearch.index.mapper.internal.TTLFieldMapper;
-import org.elasticsearch.index.mapper.internal.TimestampFieldMapper;
-import org.elasticsearch.index.mapper.internal.TypeFieldMapper;
-import org.elasticsearch.index.mapper.internal.UidFieldMapper;
-import org.elasticsearch.index.mapper.internal.VersionFieldMapper;
+import org.elasticsearch.index.mapper.internal.*;
 import org.elasticsearch.index.mapper.ip.IpFieldMapper;
 import org.elasticsearch.index.mapper.object.ObjectMapper;
 import org.elasticsearch.index.mapper.object.RootObjectMapper;
@@ -75,17 +50,16 @@ import org.elasticsearch.index.similarity.SimilarityLookupService;
 import org.elasticsearch.script.Script;
 import org.elasticsearch.script.ScriptService;
 
+import java.util.Collections;
 import java.util.Iterator;
 import java.util.List;
 import java.util.Map;
 
 import static org.elasticsearch.index.mapper.MapperBuilders.doc;
 
-/**
- *
- */
-public class DocumentMapperParser extends AbstractIndexComponent {
+public class DocumentMapperParser {
 
+    private final Settings indexSettings;
     final MapperService mapperService;
     final AnalysisService analysisService;
     private static final ESLogger logger = Loggers.getLogger(DocumentMapperParser.class);
@@ -96,13 +70,16 @@ public class DocumentMapperParser extends AbstractIndexComponent {
 
     private final Object typeParsersMutex = new Object();
     private final Version indexVersionCreated;
+    private final ParseFieldMatcher parseFieldMatcher;
 
     private volatile ImmutableMap<String, Mapper.TypeParser> typeParsers;
     private volatile ImmutableMap<String, Mapper.TypeParser> rootTypeParsers;
+    private volatile ImmutableMap<String, Mapper.TypeParser> additionalRootMappers;
 
-    public DocumentMapperParser(Index index, @IndexSettings Settings indexSettings, MapperService mapperService, AnalysisService analysisService,
+    public DocumentMapperParser(@IndexSettings Settings indexSettings, MapperService mapperService, AnalysisService analysisService,
                                 SimilarityLookupService similarityLookupService, ScriptService scriptService) {
-        super(index, indexSettings);
+        this.indexSettings = indexSettings;
+        this.parseFieldMatcher = new ParseFieldMatcher(indexSettings);
         this.mapperService = mapperService;
         this.analysisService = analysisService;
         this.similarityLookupService = similarityLookupService;
@@ -124,8 +101,7 @@ public class DocumentMapperParser extends AbstractIndexComponent {
                 .put(ObjectMapper.NESTED_CONTENT_TYPE, new ObjectMapper.TypeParser())
                 .put(TypeParsers.MULTI_FIELD_CONTENT_TYPE, TypeParsers.multiFieldConverterTypeParser)
                 .put(CompletionFieldMapper.CONTENT_TYPE, new CompletionFieldMapper.TypeParser())
-                .put(GeoPointFieldMapper.CONTENT_TYPE, new GeoPointFieldMapper.TypeParser())
-                .put(Murmur3FieldMapper.CONTENT_TYPE, new Murmur3FieldMapper.TypeParser());
+                .put(GeoPointFieldMapper.CONTENT_TYPE, new GeoPointFieldMapper.TypeParser());
 
         if (ShapesAvailability.JTS_AVAILABLE) {
             typeParsersBuilder.put(GeoShapeFieldMapper.CONTENT_TYPE, new GeoShapeFieldMapper.TypeParser());
@@ -134,7 +110,6 @@ public class DocumentMapperParser extends AbstractIndexComponent {
         typeParsers = typeParsersBuilder.immutableMap();
 
         rootTypeParsers = new MapBuilder<String, Mapper.TypeParser>()
-                .put(SizeFieldMapper.NAME, new SizeFieldMapper.TypeParser())
                 .put(IndexFieldMapper.NAME, new IndexFieldMapper.TypeParser())
                 .put(SourceFieldMapper.NAME, new SourceFieldMapper.TypeParser())
                 .put(TypeFieldMapper.NAME, new TypeFieldMapper.TypeParser())
@@ -148,6 +123,7 @@ public class DocumentMapperParser extends AbstractIndexComponent {
                 .put(IdFieldMapper.NAME, new IdFieldMapper.TypeParser())
                 .put(FieldNamesFieldMapper.NAME, new FieldNamesFieldMapper.TypeParser())
                 .immutableMap();
+        additionalRootMappers = ImmutableSortedMap.<String, Mapper.TypeParser>of();
         indexVersionCreated = Version.indexCreated(indexSettings);
     }
 
@@ -164,11 +140,15 @@ public class DocumentMapperParser extends AbstractIndexComponent {
             rootTypeParsers = new MapBuilder<>(rootTypeParsers)
                     .put(type, typeParser)
                     .immutableMap();
+            additionalRootMappers = ImmutableSortedMap.<String, Mapper.TypeParser>naturalOrder()
+                    .putAll(additionalRootMappers)
+                    .put(type, typeParser)
+                    .build();
         }
     }
 
     public Mapper.TypeParser.ParserContext parserContext() {
-        return new Mapper.TypeParser.ParserContext(analysisService, similarityLookupService, mapperService, typeParsers, indexVersionCreated);
+        return new Mapper.TypeParser.ParserContext(analysisService, similarityLookupService, mapperService, typeParsers, indexVersionCreated, parseFieldMatcher);
     }
 
     public DocumentMapper parse(String source) throws MapperParsingException {
@@ -228,7 +208,11 @@ public class DocumentMapperParser extends AbstractIndexComponent {
 
         Mapper.TypeParser.ParserContext parserContext = parserContext();
         // parse RootObjectMapper
-        DocumentMapper.Builder docBuilder = doc(index.name(), indexSettings, (RootObjectMapper.Builder) rootObjectTypeParser.parse(type, mapping, parserContext), mapperService);
+        DocumentMapper.Builder docBuilder = doc(indexSettings, (RootObjectMapper.Builder) rootObjectTypeParser.parse(type, mapping, parserContext), mapperService);
+        // Add default mapping for the plugged-in meta mappers
+        for (Map.Entry<String, Mapper.TypeParser> entry : additionalRootMappers.entrySet()) {
+            docBuilder.put((MetadataFieldMapper.Builder<?, ?>) entry.getValue().parse(entry.getKey(), Collections.<String, Object>emptyMap(), parserContext));
+        }
         Iterator<Map.Entry<String, Object>> iterator = mapping.entrySet().iterator();
         // parse DocumentMapper
         while(iterator.hasNext()) {
@@ -255,7 +239,7 @@ public class DocumentMapperParser extends AbstractIndexComponent {
                 if (typeParser != null) {
                     iterator.remove();
                     Map<String, Object> fieldNodeMap = (Map<String, Object>) fieldNode;
-                    docBuilder.put(typeParser.parse(fieldName, fieldNodeMap, parserContext));
+                    docBuilder.put((MetadataFieldMapper.Builder)typeParser.parse(fieldName, fieldNodeMap, parserContext));
                     fieldNodeMap.remove("type");
                     checkNoRemainingFields(fieldName, fieldNodeMap, parserContext.indexVersionCreated());
                 }
@@ -279,7 +263,7 @@ public class DocumentMapperParser extends AbstractIndexComponent {
 
     public static void checkNoRemainingFields(Map<String, Object> fieldNodeMap, Version indexVersionCreated, String message) {
         if (!fieldNodeMap.isEmpty()) {
-            if (indexVersionCreated.onOrAfter(Version.V_2_0_0)) {
+            if (indexVersionCreated.onOrAfter(Version.V_2_0_0_beta1)) {
                 throw new MapperParsingException(message + getRemainingFields(fieldNodeMap));
             } else {
                 logger.debug(message + "{}", getRemainingFields(fieldNodeMap));
@@ -296,7 +280,7 @@ public class DocumentMapperParser extends AbstractIndexComponent {
     }
 
     private void parseTransform(DocumentMapper.Builder docBuilder, Map<String, Object> transformConfig, Version indexVersionCreated) {
-        Script script = Script.parse(transformConfig, true);
+        Script script = Script.parse(transformConfig, true, parseFieldMatcher);
         if (script != null) {
             docBuilder.transform(scriptService, script);
         }

@@ -30,9 +30,8 @@ import org.elasticsearch.env.EnvironmentModule;
 import org.elasticsearch.index.Index;
 import org.elasticsearch.index.IndexNameModule;
 import org.elasticsearch.index.settings.IndexSettingsModule;
-import org.elasticsearch.indices.analysis.IndicesAnalysisModule;
 import org.elasticsearch.indices.analysis.IndicesAnalysisService;
-import org.elasticsearch.test.ElasticsearchTestCase;
+import org.elasticsearch.test.ESTestCase;
 import org.hamcrest.MatcherAssert;
 import org.junit.Test;
 
@@ -41,11 +40,12 @@ import static org.hamcrest.Matchers.instanceOf;
 
 /**
  */
-public class SimplePhoneticAnalysisTests extends ElasticsearchTestCase {
+public class SimplePhoneticAnalysisTests extends ESTestCase {
 
     @Test
     public void testPhoneticTokenFilterFactory() {
-        Settings settings = settingsBuilder().loadFromClasspath("org/elasticsearch/index/analysis/phonetic-1.yml")
+        String yaml = "/org/elasticsearch/index/analysis/phonetic-1.yml";
+        Settings settings = settingsBuilder().loadFromStream(yaml, getClass().getResourceAsStream(yaml))
                 .put(IndexMetaData.SETTING_VERSION_CREATED, Version.CURRENT)
                 .put("path.home", createTempDir())
                 .build();
@@ -58,8 +58,7 @@ public class SimplePhoneticAnalysisTests extends ElasticsearchTestCase {
         Index index = new Index("test");
 
         Injector parentInjector = new ModulesBuilder().add(new SettingsModule(settings),
-                new EnvironmentModule(new Environment(settings)),
-                new IndicesAnalysisModule()).createInjector();
+                new EnvironmentModule(new Environment(settings))).createInjector();
         Injector injector = new ModulesBuilder().add(
                 new IndexSettingsModule(index, settings),
                 new IndexNameModule(index),

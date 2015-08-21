@@ -22,22 +22,23 @@ package org.elasticsearch.index.mapper.internal;
 import org.apache.lucene.document.Document;
 import org.apache.lucene.document.Field;
 import org.apache.lucene.index.IndexOptions;
+import org.apache.lucene.search.Query;
+import org.apache.lucene.util.BytesRef;
 import org.elasticsearch.Version;
 import org.elasticsearch.common.Nullable;
 import org.elasticsearch.common.Strings;
 import org.elasticsearch.common.lucene.Lucene;
+import org.elasticsearch.common.lucene.search.Queries;
 import org.elasticsearch.common.settings.Settings;
 import org.elasticsearch.common.xcontent.XContentBuilder;
-import org.elasticsearch.index.fielddata.FieldDataType;
 import org.elasticsearch.index.mapper.MappedFieldType;
 import org.elasticsearch.index.mapper.Mapper;
-import org.elasticsearch.index.mapper.MapperBuilders;
 import org.elasticsearch.index.mapper.MapperParsingException;
 import org.elasticsearch.index.mapper.MergeMappingException;
 import org.elasticsearch.index.mapper.MergeResult;
+import org.elasticsearch.index.mapper.MetadataFieldMapper;
 import org.elasticsearch.index.mapper.ParseContext;
-import org.elasticsearch.index.mapper.RootMapper;
-import org.elasticsearch.index.mapper.core.AbstractFieldMapper;
+import org.elasticsearch.index.query.QueryParseContext;
 
 import java.io.IOException;
 import java.util.Iterator;
@@ -50,13 +51,13 @@ import static org.elasticsearch.index.mapper.core.TypeParsers.parseField;
 /**
  *
  */
-public class IndexFieldMapper extends AbstractFieldMapper implements RootMapper {
+public class IndexFieldMapper extends MetadataFieldMapper {
 
     public static final String NAME = "_index";
 
     public static final String CONTENT_TYPE = "_index";
 
-    public static class Defaults extends AbstractFieldMapper.Defaults {
+    public static class Defaults {
         public static final String NAME = IndexFieldMapper.NAME;
 
         public static final MappedFieldType FIELD_TYPE = new IndexFieldType();
@@ -75,7 +76,7 @@ public class IndexFieldMapper extends AbstractFieldMapper implements RootMapper 
         public static final EnabledAttributeMapper ENABLED_STATE = EnabledAttributeMapper.UNSET_DISABLED;
     }
 
-    public static class Builder extends AbstractFieldMapper.Builder<Builder, IndexFieldMapper> {
+    public static class Builder extends MetadataFieldMapper.Builder<Builder, IndexFieldMapper> {
 
         private EnabledAttributeMapper enabledState = EnabledAttributeMapper.UNSET_DISABLED;
 
@@ -91,8 +92,9 @@ public class IndexFieldMapper extends AbstractFieldMapper implements RootMapper 
 
         @Override
         public IndexFieldMapper build(BuilderContext context) {
-            fieldType.setNames(new MappedFieldType.Names(name, indexName, indexName, name));
-            return new IndexFieldMapper(fieldType, enabledState, fieldDataSettings, context.indexSettings());
+            setupFieldType(context);
+            fieldType.setHasDocValues(false);
+            return new IndexFieldMapper(fieldType, enabledState, context.indexSettings());
         }
     }
 
@@ -100,10 +102,11 @@ public class IndexFieldMapper extends AbstractFieldMapper implements RootMapper 
         @Override
         public Mapper.Builder parse(String name, Map<String, Object> node, ParserContext parserContext) throws MapperParsingException {
             Builder builder = new Builder(parserContext.mapperService().fullName(NAME));
-            if (parserContext.indexVersionCreated().before(Version.V_2_0_0)) {
-                parseField(builder, builder.name, node, parserContext);
+            if (parserContext.indexVersionCreated().onOrAfter(Version.V_2_0_0_beta1)) {
+                return builder;
             }
 
+            parseField(builder, builder.name, node, parserContext);
             for (Iterator<Map.Entry<String, Object>> iterator = node.entrySet().iterator(); iterator.hasNext();) {
                 Map.Entry<String, Object> entry = iterator.next();
                 String fieldName = Strings.toUnderscoreCase(entry.getKey());
@@ -137,6 +140,62 @@ public class IndexFieldMapper extends AbstractFieldMapper implements RootMapper 
         }
 
         @Override
+        public boolean useTermQueryWithQueryString() {
+            // As we spoof the presence of an indexed field we have to override
+            // the default of returning false which otherwise leads MatchQuery
+            // et al to run an analyzer over the query string and then try to
+            // hit the search index. We need them to use our termQuery(..)
+            // method which checks index names
+            return true;
+        }
+
+        /**
+         * This termQuery impl looks at the context to determine the index that
+         * is being queried and then returns a MATCH_ALL_QUERY or MATCH_NO_QUERY
+         * if the value matches this index. This can be useful if aliases or
+         * wildcards are used but the aim is to restrict the query to specific
+         * indices
+         */
+        @Override
+        public Query termQuery(Object value, @Nullable QueryParseContext context) {
+            if (context == null) {
+                return super.termQuery(value, context);
+            }
+            if (isSameIndex(value, context.index().getName())) {
+                return Queries.newMatchAllQuery();
+            } else {
+                return Queries.newMatchNoDocsQuery();
+            }
+        }
+        
+        
+
+        @Override
+        public Query termsQuery(List values, QueryParseContext context) {
+            if (context == null) {
+                return super.termsQuery(values, context);
+            }
+            for (Object value : values) {
+                if (isSameIndex(value, context.index().getName())) {
+                    // No need to OR these clauses - we can only logically be
+                    // running in the context of just one of these index names.
+                    return Queries.newMatchAllQuery();
+                }
+            }
+            // None of the listed index names are this one
+            return Queries.newMatchNoDocsQuery();
+        }
+
+        private boolean isSameIndex(Object value, String indexName) {
+            if (value instanceof BytesRef) {
+                BytesRef indexNameRef = new BytesRef(indexName);
+                return (indexNameRef.bytesEquals((BytesRef) value));
+            } else {
+                return indexName.equals(value.toString());
+            }
+        }
+
+        @Override
         public String value(Object value) {
             if (value == null) {
                 return null;
@@ -148,29 +207,16 @@ public class IndexFieldMapper extends AbstractFieldMapper implements RootMapper 
     private EnabledAttributeMapper enabledState;
 
     public IndexFieldMapper(Settings indexSettings, MappedFieldType existing) {
-        this(existing == null ? Defaults.FIELD_TYPE.clone() : existing,
-             Defaults.ENABLED_STATE,
-             existing == null ? null : (existing.fieldDataType() == null ? null : existing.fieldDataType().getSettings()), indexSettings);
+        this(existing == null ? Defaults.FIELD_TYPE.clone() : existing, Defaults.ENABLED_STATE, indexSettings);
     }
 
-    public IndexFieldMapper(MappedFieldType fieldType, EnabledAttributeMapper enabledState,
-                            @Nullable Settings fieldDataSettings, Settings indexSettings) {
-        super(fieldType, false, fieldDataSettings, indexSettings);
+    public IndexFieldMapper(MappedFieldType fieldType, EnabledAttributeMapper enabledState, Settings indexSettings) {
+        super(NAME, fieldType, Defaults.FIELD_TYPE, indexSettings);
         this.enabledState = enabledState;
     }
 
     public boolean enabled() {
         return this.enabledState.enabled;
-    }
-
-    @Override
-    public MappedFieldType defaultFieldType() {
-        return Defaults.FIELD_TYPE;
-    }
-
-    @Override
-    public FieldDataType defaultFieldDataType() {
-        return new FieldDataType(IndexFieldMapper.NAME);
     }
 
     public String value(Document document) {
@@ -221,13 +267,8 @@ public class IndexFieldMapper extends AbstractFieldMapper implements RootMapper 
         if (includeDefaults || enabledState != Defaults.ENABLED_STATE) {
             builder.field("enabled", enabledState.enabled);
         }
-
-        if (indexCreatedBefore2x) {
-            if (hasCustomFieldDataSettings()) {
-                builder.field("fielddata", (Map) customFieldDataSettings.getAsMap());
-            } else if (includeDefaults) {
-                builder.field("fielddata", (Map) fieldType().fieldDataType().getSettings().getAsMap());
-            }
+        if (indexCreatedBefore2x && (includeDefaults || hasCustomFieldDataSettings())) {
+            builder.field("fielddata", (Map) fieldType().fieldDataType().getSettings().getAsMap());
         }
         builder.endObject();
         return builder;

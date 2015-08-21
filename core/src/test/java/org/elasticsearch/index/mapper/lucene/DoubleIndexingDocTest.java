@@ -24,14 +24,12 @@ import org.apache.lucene.index.IndexWriter;
 import org.apache.lucene.search.IndexSearcher;
 import org.apache.lucene.search.TopDocs;
 import org.apache.lucene.store.Directory;
-import org.elasticsearch.common.logging.ESLoggerFactory;
 import org.elasticsearch.common.lucene.Lucene;
 import org.elasticsearch.common.xcontent.XContentFactory;
 import org.elasticsearch.index.IndexService;
 import org.elasticsearch.index.mapper.DocumentMapper;
-import org.elasticsearch.index.mapper.MapperUtils;
 import org.elasticsearch.index.mapper.ParsedDocument;
-import org.elasticsearch.test.ElasticsearchSingleNodeTest;
+import org.elasticsearch.test.ESSingleNodeTestCase;
 import org.junit.Test;
 
 import static org.hamcrest.Matchers.equalTo;
@@ -39,7 +37,7 @@ import static org.hamcrest.Matchers.equalTo;
 /**
  *
  */
-public class DoubleIndexingDocTest extends ElasticsearchSingleNodeTest {
+public class DoubleIndexingDocTest extends ESSingleNodeTestCase {
 
     @Test
     public void testDoubleIndexingSameDoc() throws Exception {
@@ -53,7 +51,7 @@ public class DoubleIndexingDocTest extends ElasticsearchSingleNodeTest {
         client().admin().indices().preparePutMapping("test").setType("type").setSource(mapping).get();
         DocumentMapper mapper = index.mapperService().documentMapper("type");
 
-        ParsedDocument doc = mapper.parse("type", "1", XContentFactory.jsonBuilder()
+        ParsedDocument doc = mapper.parse("test", "type", "1", XContentFactory.jsonBuilder()
                 .startObject()
                 .field("field1", "value1")
                 .field("field2", 1)

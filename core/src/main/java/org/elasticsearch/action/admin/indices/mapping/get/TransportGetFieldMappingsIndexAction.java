@@ -26,11 +26,12 @@ import com.google.common.collect.Lists;
 import org.elasticsearch.ElasticsearchException;
 import org.elasticsearch.action.admin.indices.mapping.get.GetFieldMappingsResponse.FieldMappingMetaData;
 import org.elasticsearch.action.support.ActionFilters;
-import org.elasticsearch.action.support.single.custom.TransportSingleCustomOperationAction;
+import org.elasticsearch.action.support.single.shard.TransportSingleShardAction;
 import org.elasticsearch.cluster.ClusterService;
 import org.elasticsearch.cluster.ClusterState;
 import org.elasticsearch.cluster.block.ClusterBlockException;
 import org.elasticsearch.cluster.block.ClusterBlockLevel;
+import org.elasticsearch.cluster.metadata.IndexNameExpressionResolver;
 import org.elasticsearch.cluster.routing.ShardsIterator;
 import org.elasticsearch.common.collect.MapBuilder;
 import org.elasticsearch.common.inject.Inject;
@@ -57,7 +58,7 @@ import java.util.Iterator;
 /**
  * Transport action used to retrieve the mappings related to fields that belong to a specific index
  */
-public class TransportGetFieldMappingsIndexAction extends TransportSingleCustomOperationAction<GetFieldMappingsIndexRequest, GetFieldMappingsResponse> {
+public class TransportGetFieldMappingsIndexAction extends TransportSingleShardAction<GetFieldMappingsIndexRequest, GetFieldMappingsResponse> {
 
     private static final String ACTION_NAME = GetFieldMappingsAction.NAME + "[index]";
 
@@ -65,11 +66,10 @@ public class TransportGetFieldMappingsIndexAction extends TransportSingleCustomO
     private final IndicesService indicesService;
 
     @Inject
-    public TransportGetFieldMappingsIndexAction(Settings settings, ClusterService clusterService,
-                                                TransportService transportService,
-                                                IndicesService indicesService,
-                                                ThreadPool threadPool, ActionFilters actionFilters) {
-        super(settings, ACTION_NAME, threadPool, clusterService, transportService, actionFilters, GetFieldMappingsIndexRequest.class, ThreadPool.Names.MANAGEMENT);
+    public TransportGetFieldMappingsIndexAction(Settings settings, ClusterService clusterService, TransportService transportService,
+                                                IndicesService indicesService, ThreadPool threadPool, ActionFilters actionFilters,
+                                                IndexNameExpressionResolver indexNameExpressionResolver) {
+        super(settings, ACTION_NAME, threadPool, clusterService, transportService, actionFilters, indexNameExpressionResolver, GetFieldMappingsIndexRequest.class, ThreadPool.Names.MANAGEMENT);
         this.clusterService = clusterService;
         this.indicesService = indicesService;
     }
@@ -190,13 +190,6 @@ public class TransportGetFieldMappingsIndexAction extends TransportSingleCustomO
                     final FieldMapper fieldMapper = it.next();
                     if (Regex.simpleMatch(field, fieldMapper.fieldType().names().indexName())) {
                         addFieldMapper(fieldMapper.fieldType().names().indexName(), fieldMapper, fieldMappings, request.includeDefaults());
-                        it.remove();
-                    }
-                }
-                for (Iterator<FieldMapper> it = remainingFieldMappers.iterator(); it.hasNext(); ) {
-                    final FieldMapper fieldMapper = it.next();
-                    if (Regex.simpleMatch(field, fieldMapper.fieldType().names().shortName())) {
-                        addFieldMapper(fieldMapper.fieldType().names().shortName(), fieldMapper, fieldMappings, request.includeDefaults());
                         it.remove();
                     }
                 }

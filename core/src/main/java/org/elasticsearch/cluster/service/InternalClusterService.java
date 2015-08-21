@@ -40,6 +40,8 @@ import org.elasticsearch.common.logging.ESLogger;
 import org.elasticsearch.common.logging.Loggers;
 import org.elasticsearch.common.settings.Settings;
 import org.elasticsearch.common.text.StringText;
+import org.elasticsearch.common.transport.BoundTransportAddress;
+import org.elasticsearch.common.transport.TransportAddress;
 import org.elasticsearch.common.unit.TimeValue;
 import org.elasticsearch.common.util.concurrent.*;
 import org.elasticsearch.discovery.Discovery;
@@ -154,12 +156,13 @@ public class InternalClusterService extends AbstractLifecycleComponent<ClusterSe
     protected void doStart() {
         add(localNodeMasterListeners);
         this.clusterState = ClusterState.builder(clusterState).blocks(initialBlocks).build();
-        this.updateTasksExecutor = EsExecutors.newSinglePrioritizing(daemonThreadFactory(settings, UPDATE_THREAD_NAME));
+        this.updateTasksExecutor = EsExecutors.newSinglePrioritizing(UPDATE_THREAD_NAME, daemonThreadFactory(settings, UPDATE_THREAD_NAME));
         this.reconnectToNodes = threadPool.schedule(reconnectInterval, ThreadPool.Names.GENERIC, new ReconnectToNodes());
         Map<String, String> nodeAttributes = discoveryNodeService.buildAttributes();
         // note, we rely on the fact that its a new id each time we start, see FD and "kill -9" handling
         final String nodeId = DiscoveryService.generateNodeId(settings);
-        DiscoveryNode localNode = new DiscoveryNode(settings.get("name"), nodeId, transportService.boundAddress().publishAddress(), nodeAttributes, version);
+        final TransportAddress publishAddress = transportService.boundAddress().publishAddress();
+        DiscoveryNode localNode = new DiscoveryNode(settings.get("name"), nodeId, publishAddress, nodeAttributes, version);
         DiscoveryNodes.Builder nodeBuilder = DiscoveryNodes.builder().put(localNode).localNodeId(localNode.id());
         this.clusterState = ClusterState.builder(clusterState).nodes(nodeBuilder).blocks(initialBlocks).build();
         this.transportService.setLocalNode(localNode);
@@ -337,6 +340,13 @@ public class InternalClusterService extends AbstractLifecycleComponent<ClusterSe
         return updateTasksExecutor.getMaxTaskWaitTime();
     }
 
+
+    /** asserts that the current thread is the cluster state update thread */
+    public boolean assertClusterStateThread() {
+        assert Thread.currentThread().getName().contains(InternalClusterService.UPDATE_THREAD_NAME) : "not called from the cluster state update thread";
+        return true;
+    }
+
     static abstract class SourcePrioritizedRunnable extends PrioritizedRunnable {
         protected final String source;
 
@@ -382,7 +392,7 @@ public class InternalClusterService extends AbstractLifecycleComponent<ClusterSe
                     StringBuilder sb = new StringBuilder("failed to execute cluster state update in ").append(executionTime).append(", state:\nversion [").append(previousClusterState.version()).append("], source [").append(source).append("]\n");
                     sb.append(previousClusterState.nodes().prettyPrint());
                     sb.append(previousClusterState.routingTable().prettyPrint());
-                    sb.append(previousClusterState.readOnlyRoutingNodes().prettyPrint());
+                    sb.append(previousClusterState.getRoutingNodes().prettyPrint());
                     logger.trace(sb.toString(), e);
                 }
                 warnAboutSlowTaskIfNeeded(executionTime, source);
@@ -519,14 +529,14 @@ public class InternalClusterService extends AbstractLifecycleComponent<ClusterSe
                 }
 
                 TimeValue executionTime = TimeValue.timeValueMillis(Math.max(0, TimeValue.nsecToMSec(System.nanoTime() - startTimeNS)));
-                logger.debug("processing [{}]: took {} done applying updated cluster_state (version: {}, uuid: {})", source, executionTime, newClusterState.version(), newClusterState.uuid());
+                logger.debug("processing [{}]: took {} done applying updated cluster_state (version: {}, uuid: {})", source, executionTime, newClusterState.version(), newClusterState.stateUUID());
                 warnAboutSlowTaskIfNeeded(executionTime, source);
             } catch (Throwable t) {
                 TimeValue executionTime = TimeValue.timeValueMillis(Math.max(0, TimeValue.nsecToMSec(System.nanoTime() - startTimeNS)));
-                StringBuilder sb = new StringBuilder("failed to apply updated cluster state in ").append(executionTime).append(":\nversion [").append(newClusterState.version()).append("], uuid [").append(newClusterState.uuid()).append("], source [").append(source).append("]\n");
+                StringBuilder sb = new StringBuilder("failed to apply updated cluster state in ").append(executionTime).append(":\nversion [").append(newClusterState.version()).append("], uuid [").append(newClusterState.stateUUID()).append("], source [").append(source).append("]\n");
                 sb.append(newClusterState.nodes().prettyPrint());
                 sb.append(newClusterState.routingTable().prettyPrint());
-                sb.append(newClusterState.readOnlyRoutingNodes().prettyPrint());
+                sb.append(newClusterState.getRoutingNodes().prettyPrint());
                 logger.warn(sb.toString(), t);
                 // TODO: do we want to call updateTask.onFailure here?
             }

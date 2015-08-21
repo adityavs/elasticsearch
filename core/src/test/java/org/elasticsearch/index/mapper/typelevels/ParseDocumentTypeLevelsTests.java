@@ -22,7 +22,7 @@ package org.elasticsearch.index.mapper.typelevels;
 import org.elasticsearch.common.xcontent.XContentFactory;
 import org.elasticsearch.index.mapper.DocumentMapper;
 import org.elasticsearch.index.mapper.ParsedDocument;
-import org.elasticsearch.test.ElasticsearchSingleNodeTest;
+import org.elasticsearch.test.ESSingleNodeTestCase;
 import org.junit.Test;
 
 import static org.hamcrest.Matchers.equalTo;
@@ -30,7 +30,7 @@ import static org.hamcrest.Matchers.equalTo;
 /**
  *
  */
-public class ParseDocumentTypeLevelsTests extends ElasticsearchSingleNodeTest {
+public class ParseDocumentTypeLevelsTests extends ESSingleNodeTestCase {
 
     @Test
     public void testNoLevel() throws Exception {
@@ -38,7 +38,7 @@ public class ParseDocumentTypeLevelsTests extends ElasticsearchSingleNodeTest {
 
         DocumentMapper defaultMapper = createIndex("test").mapperService().documentMapperParser().parse(defaultMapping);
 
-        ParsedDocument doc = defaultMapper.parse("type", "1", XContentFactory.jsonBuilder()
+        ParsedDocument doc = defaultMapper.parse("test", "type", "1", XContentFactory.jsonBuilder()
                 .startObject()
                 .field("test1", "value1")
                 .field("test2", "value2")
@@ -57,7 +57,7 @@ public class ParseDocumentTypeLevelsTests extends ElasticsearchSingleNodeTest {
 
         DocumentMapper defaultMapper = createIndex("test").mapperService().documentMapperParser().parse(defaultMapping);
 
-        ParsedDocument doc = defaultMapper.parse("type", "1", XContentFactory.jsonBuilder()
+        ParsedDocument doc = defaultMapper.parse("test", "type", "1", XContentFactory.jsonBuilder()
                 .startObject().startObject("type")
                 .field("test1", "value1")
                 .field("test2", "value2")
@@ -76,7 +76,7 @@ public class ParseDocumentTypeLevelsTests extends ElasticsearchSingleNodeTest {
 
         DocumentMapper defaultMapper = createIndex("test").mapperService().documentMapperParser().parse(defaultMapping);
 
-        ParsedDocument doc = defaultMapper.parse("type", "1", XContentFactory.jsonBuilder()
+        ParsedDocument doc = defaultMapper.parse("test", "type", "1", XContentFactory.jsonBuilder()
                 .startObject()
                 .field("type", "value_type")
                 .field("test1", "value1")
@@ -97,7 +97,7 @@ public class ParseDocumentTypeLevelsTests extends ElasticsearchSingleNodeTest {
 
         DocumentMapper defaultMapper = createIndex("test").mapperService().documentMapperParser().parse(defaultMapping);
 
-        ParsedDocument doc = defaultMapper.parse("type", "1", XContentFactory.jsonBuilder()
+        ParsedDocument doc = defaultMapper.parse("test", "type", "1", XContentFactory.jsonBuilder()
                 .startObject().startObject("type")
                 .field("type", "value_type")
                 .field("test1", "value1")
@@ -118,7 +118,7 @@ public class ParseDocumentTypeLevelsTests extends ElasticsearchSingleNodeTest {
 
         DocumentMapper defaultMapper = createIndex("test").mapperService().documentMapperParser().parse(defaultMapping);
 
-        ParsedDocument doc = defaultMapper.parse("type", "1", XContentFactory.jsonBuilder()
+        ParsedDocument doc = defaultMapper.parse("test", "type", "1", XContentFactory.jsonBuilder()
                 .startObject()
                 .startObject("type").field("type_field", "type_value").endObject()
                 .field("test1", "value1")
@@ -139,7 +139,7 @@ public class ParseDocumentTypeLevelsTests extends ElasticsearchSingleNodeTest {
 
         DocumentMapper defaultMapper = createIndex("test").mapperService().documentMapperParser().parse(defaultMapping);
 
-        ParsedDocument doc = defaultMapper.parse("type", "1", XContentFactory.jsonBuilder()
+        ParsedDocument doc = defaultMapper.parse("test", "type", "1", XContentFactory.jsonBuilder()
                 .startObject().startObject("type")
                 .startObject("type").field("type_field", "type_value").endObject()
                 .field("test1", "value1")
@@ -160,7 +160,7 @@ public class ParseDocumentTypeLevelsTests extends ElasticsearchSingleNodeTest {
 
         DocumentMapper defaultMapper = createIndex("test").mapperService().documentMapperParser().parse(defaultMapping);
 
-        ParsedDocument doc = defaultMapper.parse("type", "1", XContentFactory.jsonBuilder()
+        ParsedDocument doc = defaultMapper.parse("test", "type", "1", XContentFactory.jsonBuilder()
                 .startObject().startObject("type")
                 .field("test1", "value1")
                 .field("test2", "value2")
@@ -181,7 +181,7 @@ public class ParseDocumentTypeLevelsTests extends ElasticsearchSingleNodeTest {
 
         DocumentMapper defaultMapper = createIndex("test").mapperService().documentMapperParser().parse(defaultMapping);
 
-        ParsedDocument doc = defaultMapper.parse("type", "1", XContentFactory.jsonBuilder()
+        ParsedDocument doc = defaultMapper.parse("test", "type", "1", XContentFactory.jsonBuilder()
                 .startObject().startObject("type")
                 .field("test1", "value1")
                 .field("type", "value_type")
@@ -202,7 +202,7 @@ public class ParseDocumentTypeLevelsTests extends ElasticsearchSingleNodeTest {
 
         DocumentMapper defaultMapper = createIndex("test").mapperService().documentMapperParser().parse(defaultMapping);
 
-        ParsedDocument doc = defaultMapper.parse("type", "1", XContentFactory.jsonBuilder()
+        ParsedDocument doc = defaultMapper.parse("test", "type", "1", XContentFactory.jsonBuilder()
                 .startObject()
                 .field("test1", "value1")
                 .startObject("type").field("type_field", "type_value").endObject()
@@ -224,7 +224,7 @@ public class ParseDocumentTypeLevelsTests extends ElasticsearchSingleNodeTest {
 
         DocumentMapper defaultMapper = createIndex("test").mapperService().documentMapperParser().parse(defaultMapping);
 
-        ParsedDocument doc = defaultMapper.parse("type", "1", XContentFactory.jsonBuilder()
+        ParsedDocument doc = defaultMapper.parse("test", "type", "1", XContentFactory.jsonBuilder()
                 .startObject().startObject("type")
                 .field("test1", "value1")
                 .startObject("type").field("type_field", "type_value").endObject()

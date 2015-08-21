@@ -23,7 +23,7 @@ import org.elasticsearch.common.xcontent.XContentFactory;
 import org.elasticsearch.index.mapper.DocumentMapper;
 import org.elasticsearch.index.mapper.MapperService;
 import org.elasticsearch.index.mapper.ParsedDocument;
-import org.elasticsearch.test.ElasticsearchSingleNodeTest;
+import org.elasticsearch.test.ESSingleNodeTestCase;
 import org.junit.Test;
 
 import static org.hamcrest.Matchers.is;
@@ -31,19 +31,19 @@ import static org.hamcrest.Matchers.notNullValue;
 
 /**
  */
-public class SimpleExternalMappingTests extends ElasticsearchSingleNodeTest {
+public class SimpleExternalMappingTests extends ESSingleNodeTestCase {
 
     @Test
     public void testExternalValues() throws Exception {
         MapperService mapperService = createIndex("test").mapperService();
-        mapperService.documentMapperParser().putRootTypeParser(ExternalRootMapper.CONTENT_TYPE,
-                new ExternalRootMapper.TypeParser());
+        mapperService.documentMapperParser().putRootTypeParser(ExternalMetadataMapper.CONTENT_TYPE,
+                new ExternalMetadataMapper.TypeParser());
         mapperService.documentMapperParser().putTypeParser(RegisterExternalTypes.EXTERNAL,
                 new ExternalMapper.TypeParser(RegisterExternalTypes.EXTERNAL, "foo"));
 
         DocumentMapper documentMapper = mapperService.documentMapperParser().parse(
                 XContentFactory.jsonBuilder().startObject().startObject("type")
-                .startObject(ExternalRootMapper.CONTENT_TYPE)
+                .startObject(ExternalMetadataMapper.CONTENT_TYPE)
                 .endObject()
                 .startObject("properties")
                     .startObject("field").field("type", "external").endObject()
@@ -51,7 +51,7 @@ public class SimpleExternalMappingTests extends ElasticsearchSingleNodeTest {
             .endObject().endObject().string()
         );
 
-        ParsedDocument doc = documentMapper.parse("type", "1", XContentFactory.jsonBuilder()
+        ParsedDocument doc = documentMapper.parse("test", "type", "1", XContentFactory.jsonBuilder()
                 .startObject()
                     .field("field", "1234")
                 .endObject()
@@ -68,7 +68,7 @@ public class SimpleExternalMappingTests extends ElasticsearchSingleNodeTest {
         assertThat(doc.rootDoc().getField("field.field"), notNullValue());
         assertThat(doc.rootDoc().getField("field.field").stringValue(), is("foo"));
 
-        assertThat(doc.rootDoc().getField(ExternalRootMapper.FIELD_NAME).stringValue(), is(ExternalRootMapper.FIELD_VALUE));
+        assertThat(doc.rootDoc().getField(ExternalMetadataMapper.FIELD_NAME).stringValue(), is(ExternalMetadataMapper.FIELD_VALUE));
 
     }
 
@@ -99,7 +99,7 @@ public class SimpleExternalMappingTests extends ElasticsearchSingleNodeTest {
                 .endObject().endObject().endObject()
                 .string());
 
-        ParsedDocument doc = documentMapper.parse("type", "1", XContentFactory.jsonBuilder()
+        ParsedDocument doc = documentMapper.parse("test", "type", "1", XContentFactory.jsonBuilder()
                 .startObject()
                     .field("field", "1234")
                 .endObject()
@@ -153,7 +153,7 @@ public class SimpleExternalMappingTests extends ElasticsearchSingleNodeTest {
                 .endObject().endObject().endObject()
                 .string());
 
-        ParsedDocument doc = documentMapper.parse("type", "1", XContentFactory.jsonBuilder()
+        ParsedDocument doc = documentMapper.parse("test", "type", "1", XContentFactory.jsonBuilder()
                 .startObject()
                 .field("field", "1234")
                 .endObject()

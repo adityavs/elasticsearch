@@ -37,10 +37,9 @@ import org.elasticsearch.common.xcontent.XContentBuilder;
 import org.elasticsearch.common.xcontent.XContentFactory;
 import org.elasticsearch.common.xcontent.XContentParser;
 import org.elasticsearch.common.xcontent.json.JsonXContent;
-import org.elasticsearch.index.Index;
 import org.elasticsearch.index.mapper.*;
 import org.elasticsearch.index.mapper.internal.TimestampFieldMapper;
-import org.elasticsearch.test.ElasticsearchSingleNodeTest;
+import org.elasticsearch.test.ESSingleNodeTestCase;
 import org.junit.Test;
 
 import java.io.IOException;
@@ -51,23 +50,16 @@ import java.util.List;
 import java.util.Map;
 
 import static org.elasticsearch.Version.V_1_5_0;
-import static org.elasticsearch.Version.V_2_0_0;
+import static org.elasticsearch.Version.V_2_0_0_beta1;
 import static org.elasticsearch.common.settings.Settings.settingsBuilder;
 import static org.elasticsearch.test.VersionUtils.randomVersion;
 import static org.elasticsearch.test.VersionUtils.randomVersionBetween;
 import static org.elasticsearch.test.hamcrest.ElasticsearchAssertions.assertAcked;
-import static org.hamcrest.Matchers.containsString;
-import static org.hamcrest.Matchers.equalTo;
-import static org.hamcrest.Matchers.hasKey;
-import static org.hamcrest.Matchers.instanceOf;
-import static org.hamcrest.Matchers.is;
-import static org.hamcrest.Matchers.isIn;
-import static org.hamcrest.Matchers.lessThanOrEqualTo;
-import static org.hamcrest.Matchers.notNullValue;
+import static org.hamcrest.Matchers.*;
 
 /**
  */
-public class TimestampMappingTests extends ElasticsearchSingleNodeTest {
+public class TimestampMappingTests extends ESSingleNodeTestCase {
     Settings BWC_SETTINGS = Settings.builder().put(IndexMetaData.SETTING_VERSION_CREATED, Version.V_1_4_2.id).build();
 
     @Test
@@ -104,17 +96,19 @@ public class TimestampMappingTests extends ElasticsearchSingleNodeTest {
 
     @Test
     public void testDefaultValues() throws Exception {
-        for (Version version : Arrays.asList(V_1_5_0, V_2_0_0, randomVersion(random()))) {
+        for (Version version : Arrays.asList(V_1_5_0, V_2_0_0_beta1, randomVersion(random()))) {
             for (String mapping : Arrays.asList(
                     XContentFactory.jsonBuilder().startObject().startObject("type").endObject().string(),
                     XContentFactory.jsonBuilder().startObject().startObject("type").startObject("_timestamp").endObject().endObject().string())) {
                 DocumentMapper docMapper = createIndex("test", Settings.builder().put(IndexMetaData.SETTING_VERSION_CREATED, version).build()).mapperService().documentMapperParser().parse(mapping);
                 assertThat(docMapper.timestampFieldMapper().enabled(), equalTo(TimestampFieldMapper.Defaults.ENABLED.enabled));
-                assertThat(docMapper.timestampFieldMapper().fieldType().stored(), equalTo(version.onOrAfter(Version.V_2_0_0)));
+                assertThat(docMapper.timestampFieldMapper().fieldType().stored(), equalTo(version.onOrAfter(Version.V_2_0_0_beta1)));
                 assertThat(docMapper.timestampFieldMapper().fieldType().indexOptions(), equalTo(TimestampFieldMapper.Defaults.FIELD_TYPE.indexOptions()));
                 assertThat(docMapper.timestampFieldMapper().path(), equalTo(TimestampFieldMapper.Defaults.PATH));
-                assertThat(docMapper.timestampFieldMapper().fieldType().dateTimeFormatter().format(), equalTo(TimestampFieldMapper.DEFAULT_DATE_TIME_FORMAT));
-                assertThat(docMapper.timestampFieldMapper().fieldType().hasDocValues(), equalTo(version.onOrAfter(Version.V_2_0_0)));
+                assertThat(docMapper.timestampFieldMapper().fieldType().hasDocValues(), equalTo(version.onOrAfter(Version.V_2_0_0_beta1)));
+                String expectedFormat = version.onOrAfter(Version.V_2_0_0_beta1) ? TimestampFieldMapper.DEFAULT_DATE_TIME_FORMAT :
+                        TimestampFieldMapper.Defaults.DATE_TIME_FORMATTER_BEFORE_2_0.format();
+                assertThat(docMapper.timestampFieldMapper().fieldType().dateTimeFormatter().format(), equalTo(expectedFormat));
                 assertAcked(client().admin().indices().prepareDelete("test").execute().get());
             }
         }
@@ -755,7 +749,7 @@ public class TimestampMappingTests extends ElasticsearchSingleNodeTest {
         IndexRequest request = new IndexRequest("test", "type", "1").source(doc);
         request.process(metaData, mappingMetaData, true, "test");
 
-        assertEquals(request.timestamp(), "1");
+        assertThat(request.timestamp(), is("1"));
     }
 
     public void testIncludeInObjectBackcompat() throws Exception {
@@ -773,7 +767,7 @@ public class TimestampMappingTests extends ElasticsearchSingleNodeTest {
 
         // _timestamp in a document never worked, so backcompat is ignoring the field
         assertEquals(MappingMetaData.Timestamp.parseStringTimestamp("1970", Joda.forPattern("YYYY"), Version.V_1_4_2), request.timestamp());
-        assertNull(docMapper.parse("type", "1", doc.bytes()).rootDoc().get("_timestamp"));
+        assertNull(docMapper.parse("test", "type", "1", doc.bytes()).rootDoc().get("_timestamp"));
     }
 
     public void testThatEpochCanBeIgnoredWithCustomFormat() throws Exception {

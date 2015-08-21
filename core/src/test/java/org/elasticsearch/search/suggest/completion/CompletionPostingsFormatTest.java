@@ -24,7 +24,6 @@ import com.google.common.collect.Lists;
 import org.apache.lucene.analysis.standard.StandardAnalyzer;
 import org.apache.lucene.codecs.Codec;
 import org.apache.lucene.codecs.FieldsConsumer;
-import org.apache.lucene.codecs.FilterCodec;
 import org.apache.lucene.codecs.PostingsFormat;
 import org.apache.lucene.codecs.lucene50.Lucene50Codec;
 import org.apache.lucene.document.Document;
@@ -52,18 +51,15 @@ import org.apache.lucene.util.BytesRef;
 import org.apache.lucene.util.LineFileDocs;
 import org.elasticsearch.Version;
 import org.elasticsearch.cluster.metadata.IndexMetaData;
-import org.elasticsearch.common.lucene.Lucene;
 import org.elasticsearch.common.settings.Settings;
 import org.elasticsearch.index.analysis.NamedAnalyzer;
-import org.elasticsearch.index.codec.postingsformat.Elasticsearch090PostingsFormat;
-import org.elasticsearch.index.mapper.MappedFieldType;
+import org.elasticsearch.index.mapper.FieldMapper;
 import org.elasticsearch.index.mapper.MappedFieldType.Names;
-import org.elasticsearch.index.mapper.core.AbstractFieldMapper;
 import org.elasticsearch.index.mapper.core.CompletionFieldMapper;
 import org.elasticsearch.search.suggest.SuggestUtils;
 import org.elasticsearch.search.suggest.completion.Completion090PostingsFormat.LookupFactory;
 import org.elasticsearch.search.suggest.context.ContextMapping;
-import org.elasticsearch.test.ElasticsearchTestCase;
+import org.elasticsearch.test.ESTestCase;
 import org.junit.Test;
 
 import java.io.IOException;
@@ -77,7 +73,7 @@ import java.util.Set;
 import static org.hamcrest.Matchers.equalTo;
 import static org.hamcrest.Matchers.is;
 
-public class CompletionPostingsFormatTest extends ElasticsearchTestCase {
+public class CompletionPostingsFormatTest extends ESTestCase {
 
     Settings indexSettings = Settings.builder().put(IndexMetaData.SETTING_VERSION_CREATED, Version.CURRENT.id).build();
     static final CompletionFieldMapper.CompletionFieldType FIELD_TYPE = CompletionFieldMapper.Defaults.FIELD_TYPE.clone();
@@ -249,7 +245,7 @@ public class CompletionPostingsFormatTest extends ElasticsearchTestCase {
         AnalyzingCompletionLookupProvider currentProvider = new AnalyzingCompletionLookupProvider(preserveSeparators, false, preservePositionIncrements, usePayloads);
         CompletionFieldMapper.CompletionFieldType fieldType = FIELD_TYPE.clone();
         fieldType.setProvider(currentProvider);
-        final CompletionFieldMapper mapper = new CompletionFieldMapper(fieldType, Integer.MAX_VALUE, indexSettings, AbstractFieldMapper.MultiFields.empty(), null);
+        final CompletionFieldMapper mapper = new CompletionFieldMapper("foo", fieldType, Integer.MAX_VALUE, indexSettings, FieldMapper.MultiFields.empty(), null);
         Lookup buildAnalyzingLookup = buildAnalyzingLookup(mapper, titles, titles, weights);
         Field field = buildAnalyzingLookup.getClass().getDeclaredField("maxAnalyzedPathsForOneInput");
         field.setAccessible(true);

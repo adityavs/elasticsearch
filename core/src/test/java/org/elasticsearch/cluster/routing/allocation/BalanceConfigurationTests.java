@@ -21,8 +21,8 @@ package org.elasticsearch.cluster.routing.allocation;
 
 import com.carrotsearch.hppc.cursors.ObjectCursor;
 import org.elasticsearch.Version;
-import org.elasticsearch.cluster.ClusterInfoService;
 import org.elasticsearch.cluster.ClusterState;
+import org.elasticsearch.cluster.EmptyClusterInfoService;
 import org.elasticsearch.cluster.metadata.IndexMetaData;
 import org.elasticsearch.cluster.metadata.MetaData;
 import org.elasticsearch.cluster.node.DiscoveryNode;
@@ -35,9 +35,9 @@ import org.elasticsearch.cluster.routing.allocation.decider.ClusterRebalanceAllo
 import org.elasticsearch.common.logging.ESLogger;
 import org.elasticsearch.common.logging.Loggers;
 import org.elasticsearch.common.settings.Settings;
+import org.elasticsearch.test.ESAllocationTestCase;
 import org.elasticsearch.test.gateway.NoopGatewayAllocator;
 import org.elasticsearch.node.settings.NodeSettingsService;
-import org.elasticsearch.test.ElasticsearchAllocationTestCase;
 import org.hamcrest.Matchers;
 import org.junit.Test;
 
@@ -45,7 +45,7 @@ import static org.elasticsearch.cluster.routing.ShardRoutingState.INITIALIZING;
 import static org.elasticsearch.cluster.routing.ShardRoutingState.STARTED;
 import static org.elasticsearch.common.settings.Settings.settingsBuilder;
 
-public class BalanceConfigurationTests extends ElasticsearchAllocationTestCase {
+public class BalanceConfigurationTests extends ESAllocationTestCase {
 
     private final ESLogger logger = Loggers.getLogger(BalanceConfigurationTests.class);
     // TODO maybe we can randomize these numbers somehow
@@ -132,26 +132,26 @@ public class BalanceConfigurationTests extends ElasticsearchAllocationTestCase {
         ClusterState clusterState = ClusterState.builder(org.elasticsearch.cluster.ClusterName.DEFAULT).nodes(nodes).metaData(metaData).routingTable(routingTable).build();
         routingTable = strategy.reroute(clusterState).routingTable();
         clusterState = ClusterState.builder(clusterState).routingTable(routingTable).build();
-        RoutingNodes routingNodes = clusterState.routingNodes();
+        RoutingNodes routingNodes = clusterState.getRoutingNodes();
 
         logger.info("restart all the primary shards, replicas will start initializing");
-        routingNodes = clusterState.routingNodes();
+        routingNodes = clusterState.getRoutingNodes();
         routingTable = strategy.applyStartedShards(clusterState, routingNodes.shardsWithState(INITIALIZING)).routingTable();
         clusterState = ClusterState.builder(clusterState).routingTable(routingTable).build();
-        routingNodes = clusterState.routingNodes();
+        routingNodes = clusterState.getRoutingNodes();
 
         logger.info("start the replica shards");
-        routingNodes = clusterState.routingNodes();
+        routingNodes = clusterState.getRoutingNodes();
         routingTable = strategy.applyStartedShards(clusterState, routingNodes.shardsWithState(INITIALIZING)).routingTable();
         clusterState = ClusterState.builder(clusterState).routingTable(routingTable).build();
-        routingNodes = clusterState.routingNodes();
+        routingNodes = clusterState.getRoutingNodes();
 
         logger.info("complete rebalancing");
         RoutingTable prev = routingTable;
         while (true) {
             routingTable = strategy.applyStartedShards(clusterState, routingNodes.shardsWithState(INITIALIZING)).routingTable();
             clusterState = ClusterState.builder(clusterState).routingTable(routingTable).build();
-            routingNodes = clusterState.routingNodes();
+            routingNodes = clusterState.getRoutingNodes();
             if (routingTable == prev)
                 break;
             prev = routingTable;
@@ -168,7 +168,7 @@ public class BalanceConfigurationTests extends ElasticsearchAllocationTestCase {
 
         RoutingTable routingTable = strategy.reroute(clusterState).routingTable();
         clusterState = ClusterState.builder(clusterState).routingTable(routingTable).build();
-        RoutingNodes routingNodes = clusterState.routingNodes();
+        RoutingNodes routingNodes = clusterState.getRoutingNodes();
 
         // move initializing to started
 
@@ -176,7 +176,7 @@ public class BalanceConfigurationTests extends ElasticsearchAllocationTestCase {
         while (true) {
             routingTable = strategy.applyStartedShards(clusterState, routingNodes.shardsWithState(INITIALIZING)).routingTable();
             clusterState = ClusterState.builder(clusterState).routingTable(routingTable).build();
-            routingNodes = clusterState.routingNodes();
+            routingNodes = clusterState.getRoutingNodes();
             if (routingTable == prev)
                 break;
             prev = routingTable;
@@ -194,29 +194,29 @@ public class BalanceConfigurationTests extends ElasticsearchAllocationTestCase {
         }
 
         clusterState = ClusterState.builder(clusterState).nodes(nodes.build()).build();
-        RoutingNodes routingNodes = clusterState.routingNodes();
+        RoutingNodes routingNodes = clusterState.getRoutingNodes();
 
         logger.info("start all the primary shards, replicas will start initializing");
         RoutingTable routingTable = strategy.applyStartedShards(clusterState, routingNodes.shardsWithState(INITIALIZING)).routingTable();
         clusterState = ClusterState.builder(clusterState).routingTable(routingTable).build();
-        routingNodes = clusterState.routingNodes();
+        routingNodes = clusterState.getRoutingNodes();
 
         logger.info("start the replica shards");
         routingTable = strategy.applyStartedShards(clusterState, routingNodes.shardsWithState(INITIALIZING)).routingTable();
         clusterState = ClusterState.builder(clusterState).routingTable(routingTable).build();
-        routingNodes = clusterState.routingNodes();
+        routingNodes = clusterState.getRoutingNodes();
 
         logger.info("rebalancing");
         routingTable = strategy.reroute(clusterState).routingTable();
         clusterState = ClusterState.builder(clusterState).routingTable(routingTable).build();
-        routingNodes = clusterState.routingNodes();
+        routingNodes = clusterState.getRoutingNodes();
 
         logger.info("complete rebalancing");
         RoutingTable prev = routingTable;
         while (true) {
             routingTable = strategy.applyStartedShards(clusterState, routingNodes.shardsWithState(INITIALIZING)).routingTable();
             clusterState = ClusterState.builder(clusterState).routingTable(routingTable).build();
-            routingNodes = clusterState.routingNodes();
+            routingNodes = clusterState.getRoutingNodes();
             if (routingTable == prev)
                 break;
             prev = routingTable;
@@ -369,37 +369,37 @@ public class BalanceConfigurationTests extends ElasticsearchAllocationTestCase {
                     switch (sr.id()) {
                         case 0:
                             if (sr.primary()) {
-                                allocation.routingNodes().assign(sr, "node1");
+                                allocation.routingNodes().initialize(sr, "node1", -1);
                             } else {
-                                allocation.routingNodes().assign(sr, "node0");
+                                allocation.routingNodes().initialize(sr, "node0", -1);
                             }
                             break;
                         case 1:
                             if (sr.primary()) {
-                                allocation.routingNodes().assign(sr, "node1");
+                                allocation.routingNodes().initialize(sr, "node1", -1);
                             } else {
-                                allocation.routingNodes().assign(sr, "node2");
+                                allocation.routingNodes().initialize(sr, "node2", -1);
                             }
                             break;
                         case 2:
                             if (sr.primary()) {
-                                allocation.routingNodes().assign(sr, "node3");
+                                allocation.routingNodes().initialize(sr, "node3", -1);
                             } else {
-                                allocation.routingNodes().assign(sr, "node2");
+                                allocation.routingNodes().initialize(sr, "node2", -1);
                             }
                             break;
                         case 3:
                             if (sr.primary()) {
-                                allocation.routingNodes().assign(sr, "node3");
+                                allocation.routingNodes().initialize(sr, "node3", -1);
                             } else {
-                                allocation.routingNodes().assign(sr, "node1");
+                                allocation.routingNodes().initialize(sr, "node1", -1);
                             }
                             break;
                         case 4:
                             if (sr.primary()) {
-                                allocation.routingNodes().assign(sr, "node2");
+                                allocation.routingNodes().initialize(sr, "node2", -1);
                             } else {
-                                allocation.routingNodes().assign(sr, "node0");
+                                allocation.routingNodes().initialize(sr, "node0", -1);
                             }
                             break;
                     }
@@ -408,7 +408,7 @@ public class BalanceConfigurationTests extends ElasticsearchAllocationTestCase {
                 unassigned.clear();
                 return changed;
             }
-        }), ClusterInfoService.EMPTY);
+        }), EmptyClusterInfoService.INSTANCE);
         MetaData.Builder metaDataBuilder = MetaData.builder();
         RoutingTable.Builder routingTableBuilder = RoutingTable.builder();
         IndexMetaData.Builder indexMeta = IndexMetaData.builder("test").settings(settings(Version.CURRENT)).numberOfShards(5).numberOfReplicas(1);
@@ -427,7 +427,7 @@ public class BalanceConfigurationTests extends ElasticsearchAllocationTestCase {
         ClusterState clusterState = ClusterState.builder(org.elasticsearch.cluster.ClusterName.DEFAULT).nodes(nodes).metaData(metaData).routingTable(routingTable).build();
         routingTable = strategy.reroute(clusterState).routingTable();
         clusterState = ClusterState.builder(clusterState).routingTable(routingTable).build();
-        RoutingNodes routingNodes = clusterState.routingNodes();
+        RoutingNodes routingNodes = clusterState.getRoutingNodes();
 
         for (RoutingNode routingNode : routingNodes) {
             for (ShardRouting shardRouting : routingNode) {
@@ -437,10 +437,10 @@ public class BalanceConfigurationTests extends ElasticsearchAllocationTestCase {
         strategy = createAllocationService(settings.build());
 
         logger.info("use the new allocator and check if it moves shards");
-        routingNodes = clusterState.routingNodes();
+        routingNodes = clusterState.getRoutingNodes();
         routingTable = strategy.applyStartedShards(clusterState, routingNodes.shardsWithState(INITIALIZING)).routingTable();
         clusterState = ClusterState.builder(clusterState).routingTable(routingTable).build();
-        routingNodes = clusterState.routingNodes();
+        routingNodes = clusterState.getRoutingNodes();
         for (RoutingNode routingNode : routingNodes) {
             for (ShardRouting shardRouting : routingNode) {
                 assertThat(shardRouting.state(), Matchers.equalTo(ShardRoutingState.STARTED));
@@ -450,7 +450,7 @@ public class BalanceConfigurationTests extends ElasticsearchAllocationTestCase {
         logger.info("start the replica shards");
         routingTable = strategy.applyStartedShards(clusterState, routingNodes.shardsWithState(INITIALIZING)).routingTable();
         clusterState = ClusterState.builder(clusterState).routingTable(routingTable).build();
-        routingNodes = clusterState.routingNodes();
+        routingNodes = clusterState.getRoutingNodes();
 
         for (RoutingNode routingNode : routingNodes) {
             for (ShardRouting shardRouting : routingNode) {
@@ -461,7 +461,7 @@ public class BalanceConfigurationTests extends ElasticsearchAllocationTestCase {
         logger.info("rebalancing");
         routingTable = strategy.reroute(clusterState).routingTable();
         clusterState = ClusterState.builder(clusterState).routingTable(routingTable).build();
-        routingNodes = clusterState.routingNodes();
+        routingNodes = clusterState.getRoutingNodes();
 
         for (RoutingNode routingNode : routingNodes) {
             for (ShardRouting shardRouting : routingNode) {

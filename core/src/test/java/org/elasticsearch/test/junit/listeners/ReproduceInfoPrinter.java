@@ -25,7 +25,7 @@ import com.carrotsearch.randomizedtesting.TraceFormatting;
 import org.elasticsearch.common.Strings;
 import org.elasticsearch.common.logging.ESLogger;
 import org.elasticsearch.common.logging.Loggers;
-import org.elasticsearch.test.ElasticsearchTestCase;
+import org.elasticsearch.test.ESTestCase;
 import org.elasticsearch.test.InternalTestCluster;
 import org.junit.internal.AssumptionViolatedException;
 import org.junit.runner.Description;
@@ -38,11 +38,11 @@ import java.util.TimeZone;
 import static com.carrotsearch.randomizedtesting.SysGlobals.SYSPROP_ITERATIONS;
 import static com.carrotsearch.randomizedtesting.SysGlobals.SYSPROP_PREFIX;
 import static com.carrotsearch.randomizedtesting.SysGlobals.SYSPROP_TESTMETHOD;
-import static org.elasticsearch.test.ElasticsearchIntegrationTest.TESTS_CLUSTER;
-import static org.elasticsearch.test.rest.ElasticsearchRestTestCase.REST_TESTS_BLACKLIST;
-import static org.elasticsearch.test.rest.ElasticsearchRestTestCase.REST_TESTS_SPEC;
-import static org.elasticsearch.test.rest.ElasticsearchRestTestCase.REST_TESTS_SUITE;
-import static org.elasticsearch.test.rest.ElasticsearchRestTestCase.Rest;
+import static org.elasticsearch.test.ESIntegTestCase.TESTS_CLUSTER;
+import static org.elasticsearch.test.rest.ESRestTestCase.REST_TESTS_BLACKLIST;
+import static org.elasticsearch.test.rest.ESRestTestCase.REST_TESTS_SPEC;
+import static org.elasticsearch.test.rest.ESRestTestCase.REST_TESTS_SUITE;
+import static org.elasticsearch.test.rest.ESRestTestCase.Rest;
 
 /**
  * A {@link RunListener} that emits to {@link System#err} a string with command
@@ -50,7 +50,7 @@ import static org.elasticsearch.test.rest.ElasticsearchRestTestCase.Rest;
  */
 public class ReproduceInfoPrinter extends RunListener {
 
-    protected final ESLogger logger = Loggers.getLogger(ElasticsearchTestCase.class);
+    protected final ESLogger logger = Loggers.getLogger(ESTestCase.class);
 
     @Override
     public void testStarted(Description description) throws Exception {
@@ -62,6 +62,13 @@ public class ReproduceInfoPrinter extends RunListener {
         logger.trace("Test {} finished", description.getDisplayName());
     }
 
+    /**
+     * true if we are running maven integration tests (mvn verify)
+     */
+    static boolean inVerifyPhase() {
+        return Boolean.parseBoolean(System.getProperty("tests.verify.phase"));
+    }
+
     @Override
     public void testFailure(Failure failure) throws Exception {
         // Ignore assumptions.
@@ -70,7 +77,15 @@ public class ReproduceInfoPrinter extends RunListener {
         }
 
         final StringBuilder b = new StringBuilder();
-        b.append("REPRODUCE WITH: mvn test -Pdev");
+        if (inVerifyPhase()) {
+            b.append("REPRODUCE WITH: mvn verify -Pdev -Dskip.unit.tests" );
+        } else {
+            b.append("REPRODUCE WITH: mvn test -Pdev");
+        }
+        String project = System.getProperty("tests.project");
+        if (project != null) {
+            b.append(" -pl " + project);
+        }
         MavenMessageBuilder mavenMessageBuilder = new MavenMessageBuilder(b);
         mavenMessageBuilder.appendAllOpts(failure.getDescription());
 
@@ -140,9 +155,13 @@ public class ReproduceInfoPrinter extends RunListener {
         }
 
         public ReproduceErrorMessageBuilder appendESProperties() {
-            appendProperties("es.logger.level", "es.node.mode", "es.node.local", TESTS_CLUSTER, InternalTestCluster.TESTS_ENABLE_MOCK_MODULES,
-                    "tests.assertion.disabled", "tests.security.manager", "tests.nightly", "tests.jvms", "tests.client.ratio", "tests.heap.size",
-                    "tests.bwc", "tests.bwc.version");
+            appendProperties("es.logger.level");
+            if (inVerifyPhase()) {
+                // these properties only make sense for integration tests
+                appendProperties("es.node.mode", "es.node.local", TESTS_CLUSTER, InternalTestCluster.TESTS_ENABLE_MOCK_MODULES);
+            }
+            appendProperties("tests.assertion.disabled", "tests.security.manager", "tests.nightly", "tests.jvms", 
+                             "tests.client.ratio", "tests.heap.size", "tests.bwc", "tests.bwc.version");
             if (System.getProperty("tests.jvm.argline") != null && !System.getProperty("tests.jvm.argline").isEmpty()) {
                 appendOpt("tests.jvm.argline", "\"" + System.getProperty("tests.jvm.argline") + "\"");
             }

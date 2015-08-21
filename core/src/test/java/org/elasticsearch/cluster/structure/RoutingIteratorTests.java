@@ -34,14 +34,14 @@ import org.elasticsearch.cluster.routing.allocation.decider.ClusterRebalanceAllo
 import org.elasticsearch.cluster.routing.OperationRouting;
 import org.elasticsearch.common.settings.Settings;
 import org.elasticsearch.index.shard.ShardId;
-import org.elasticsearch.test.ElasticsearchAllocationTestCase;
+import org.elasticsearch.test.ESAllocationTestCase;
 import org.junit.Test;
 
 import static org.elasticsearch.cluster.routing.ShardRoutingState.INITIALIZING;
 import static org.elasticsearch.common.settings.Settings.settingsBuilder;
 import static org.hamcrest.Matchers.*;
 
-public class RoutingIteratorTests extends ElasticsearchAllocationTestCase {
+public class RoutingIteratorTests extends ESAllocationTestCase {
 
     @Test
     public void testEmptyIterator() {
@@ -238,10 +238,10 @@ public class RoutingIteratorTests extends ElasticsearchAllocationTestCase {
         routingTable = strategy.reroute(clusterState).routingTable();
         clusterState = ClusterState.builder(clusterState).routingTable(routingTable).build();
 
-        routingTable = strategy.applyStartedShards(clusterState, clusterState.routingNodes().shardsWithState(INITIALIZING)).routingTable();
+        routingTable = strategy.applyStartedShards(clusterState, clusterState.getRoutingNodes().shardsWithState(INITIALIZING)).routingTable();
         clusterState = ClusterState.builder(clusterState).routingTable(routingTable).build();
 
-        routingTable = strategy.applyStartedShards(clusterState, clusterState.routingNodes().shardsWithState(INITIALIZING)).routingTable();
+        routingTable = strategy.applyStartedShards(clusterState, clusterState.getRoutingNodes().shardsWithState(INITIALIZING)).routingTable();
         clusterState = ClusterState.builder(clusterState).routingTable(routingTable).build();
 
         // after all are started, check routing iteration
@@ -288,7 +288,7 @@ public class RoutingIteratorTests extends ElasticsearchAllocationTestCase {
         routingTable = strategy.reroute(clusterState).routingTable();
         clusterState = ClusterState.builder(clusterState).routingTable(routingTable).build();
 
-        routingTable = strategy.applyStartedShards(clusterState, clusterState.routingNodes().shardsWithState(INITIALIZING)).routingTable();
+        routingTable = strategy.applyStartedShards(clusterState, clusterState.getRoutingNodes().shardsWithState(INITIALIZING)).routingTable();
         clusterState = ClusterState.builder(clusterState).routingTable(routingTable).build();
 
         ShardsIterator shardsIterator = clusterState.routingTable().index("test").shard(0).onlyNodeSelectorActiveInitializingShardsIt("disk:ebs",clusterState.nodes());
@@ -344,41 +344,127 @@ public class RoutingIteratorTests extends ElasticsearchAllocationTestCase {
         routingTable = strategy.reroute(clusterState).routingTable();
         clusterState = ClusterState.builder(clusterState).routingTable(routingTable).build();
 
-        routingTable = strategy.applyStartedShards(clusterState, clusterState.routingNodes().shardsWithState(INITIALIZING)).routingTable();
+        routingTable = strategy.applyStartedShards(clusterState, clusterState.getRoutingNodes().shardsWithState(INITIALIZING)).routingTable();
         clusterState = ClusterState.builder(clusterState).routingTable(routingTable).build();
 
-        routingTable = strategy.applyStartedShards(clusterState, clusterState.routingNodes().shardsWithState(INITIALIZING)).routingTable();
+        routingTable = strategy.applyStartedShards(clusterState, clusterState.getRoutingNodes().shardsWithState(INITIALIZING)).routingTable();
         clusterState = ClusterState.builder(clusterState).routingTable(routingTable).build();
 
         OperationRouting operationRouting = new OperationRouting(Settings.Builder.EMPTY_SETTINGS, new AwarenessAllocationDecider());
 
-        GroupShardsIterator shardIterators = operationRouting.searchShards(clusterState, new String[]{"test"}, new String[]{"test"}, null, "_shards:0");
+        GroupShardsIterator shardIterators = operationRouting.searchShards(clusterState, new String[]{"test"}, null, "_shards:0");
         assertThat(shardIterators.size(), equalTo(1));
         assertThat(shardIterators.iterator().next().shardId().id(), equalTo(0));
 
-        shardIterators = operationRouting.searchShards(clusterState, new String[]{"test"}, new String[]{"test"}, null, "_shards:1");
+        shardIterators = operationRouting.searchShards(clusterState, new String[]{"test"}, null, "_shards:1");
         assertThat(shardIterators.size(), equalTo(1));
         assertThat(shardIterators.iterator().next().shardId().id(), equalTo(1));
 
         //check node preference, first without preference to see they switch
-        shardIterators = operationRouting.searchShards(clusterState, new String[]{"test"}, new String[]{"test"}, null, "_shards:0;");
+        shardIterators = operationRouting.searchShards(clusterState, new String[]{"test"}, null, "_shards:0;");
         assertThat(shardIterators.size(), equalTo(1));
         assertThat(shardIterators.iterator().next().shardId().id(), equalTo(0));
         String firstRoundNodeId = shardIterators.iterator().next().nextOrNull().currentNodeId();
 
-        shardIterators = operationRouting.searchShards(clusterState, new String[]{"test"}, new String[]{"test"}, null, "_shards:0");
+        shardIterators = operationRouting.searchShards(clusterState, new String[]{"test"}, null, "_shards:0");
         assertThat(shardIterators.size(), equalTo(1));
         assertThat(shardIterators.iterator().next().shardId().id(), equalTo(0));
         assertThat(shardIterators.iterator().next().nextOrNull().currentNodeId(), not(equalTo(firstRoundNodeId)));
 
-        shardIterators = operationRouting.searchShards(clusterState, new String[]{"test"}, new String[]{"test"}, null, "_shards:0;_prefer_node:node1");
+        shardIterators = operationRouting.searchShards(clusterState, new String[]{"test"}, null, "_shards:0;_prefer_node:node1");
         assertThat(shardIterators.size(), equalTo(1));
         assertThat(shardIterators.iterator().next().shardId().id(), equalTo(0));
         assertThat(shardIterators.iterator().next().nextOrNull().currentNodeId(), equalTo("node1"));
 
-        shardIterators = operationRouting.searchShards(clusterState, new String[]{"test"}, new String[]{"test"}, null, "_shards:0;_prefer_node:node1");
+        shardIterators = operationRouting.searchShards(clusterState, new String[]{"test"}, null, "_shards:0;_prefer_node:node1");
         assertThat(shardIterators.size(), equalTo(1));
         assertThat(shardIterators.iterator().next().shardId().id(), equalTo(0));
         assertThat(shardIterators.iterator().next().nextOrNull().currentNodeId(), equalTo("node1"));
     }
+
+    @Test
+    public void testReplicaShardPreferenceIters() throws Exception {
+        AllocationService strategy = createAllocationService(settingsBuilder()
+                .put("cluster.routing.allocation.concurrent_recoveries", 10)
+                .build());
+
+        OperationRouting operationRouting = new OperationRouting(Settings.Builder.EMPTY_SETTINGS, new AwarenessAllocationDecider());
+
+        MetaData metaData = MetaData.builder()
+                .put(IndexMetaData.builder("test").settings(settings(Version.CURRENT)).numberOfShards(2).numberOfReplicas(2))
+                .build();
+
+        RoutingTable routingTable = RoutingTable.builder()
+                .addAsNew(metaData.index("test"))
+                .build();
+
+        ClusterState clusterState = ClusterState.builder(ClusterName.DEFAULT).metaData(metaData).routingTable(routingTable).build();
+
+        clusterState = ClusterState.builder(clusterState).nodes(DiscoveryNodes.builder()
+                        .put(newNode("node1"))
+                        .put(newNode("node2"))
+                        .put(newNode("node3"))
+                        .localNodeId("node1")
+        ).build();
+        routingTable = strategy.reroute(clusterState).routingTable();
+        clusterState = ClusterState.builder(clusterState).routingTable(routingTable).build();
+
+        routingTable = strategy.applyStartedShards(clusterState, clusterState.getRoutingNodes().shardsWithState(INITIALIZING)).routingTable();
+        clusterState = ClusterState.builder(clusterState).routingTable(routingTable).build();
+
+        // When replicas haven't initialized, it comes back with the primary first, then initializing replicas
+        GroupShardsIterator shardIterators = operationRouting.searchShards(clusterState, new String[]{"test"}, null, "_replica_first");
+        assertThat(shardIterators.size(), equalTo(2)); // two potential shards
+        ShardIterator iter = shardIterators.iterator().next();
+        assertThat(iter.size(), equalTo(3)); // three potential candidates for the shard
+        ShardRouting routing = iter.nextOrNull();
+        assertNotNull(routing);
+        assertThat(routing.shardId().id(), anyOf(equalTo(0), equalTo(1)));
+        assertTrue(routing.primary()); // replicas haven't initialized yet, so primary is first
+        assertTrue(routing.started());
+        routing = iter.nextOrNull();
+        assertThat(routing.shardId().id(), anyOf(equalTo(0), equalTo(1)));
+        assertFalse(routing.primary());
+        assertTrue(routing.initializing());
+        routing = iter.nextOrNull();
+        assertThat(routing.shardId().id(), anyOf(equalTo(0), equalTo(1)));
+        assertFalse(routing.primary());
+        assertTrue(routing.initializing());
+
+        routingTable = strategy.applyStartedShards(clusterState, clusterState.getRoutingNodes().shardsWithState(INITIALIZING)).routingTable();
+        clusterState = ClusterState.builder(clusterState).routingTable(routingTable).build();
+
+        routingTable = strategy.applyStartedShards(clusterState, clusterState.getRoutingNodes().shardsWithState(INITIALIZING)).routingTable();
+        clusterState = ClusterState.builder(clusterState).routingTable(routingTable).build();
+
+
+        shardIterators = operationRouting.searchShards(clusterState, new String[]{"test"}, null, "_replica");
+        assertThat(shardIterators.size(), equalTo(2)); // two potential shards
+        iter = shardIterators.iterator().next();
+        assertThat(iter.size(), equalTo(2)); // two potential replicas for the shard
+        routing = iter.nextOrNull();
+        assertNotNull(routing);
+        assertThat(routing.shardId().id(), anyOf(equalTo(0), equalTo(1)));
+        assertFalse(routing.primary());
+        routing = iter.nextOrNull();
+        assertThat(routing.shardId().id(), anyOf(equalTo(0), equalTo(1)));
+        assertFalse(routing.primary());
+
+        shardIterators = operationRouting.searchShards(clusterState, new String[]{"test"}, null, "_replica_first");
+        assertThat(shardIterators.size(), equalTo(2)); // two potential shards
+        iter = shardIterators.iterator().next();
+        assertThat(iter.size(), equalTo(3)); // three potential candidates for the shard
+        routing = iter.nextOrNull();
+        assertNotNull(routing);
+        assertThat(routing.shardId().id(), anyOf(equalTo(0), equalTo(1)));
+        assertFalse(routing.primary());
+        routing = iter.nextOrNull();
+        assertThat(routing.shardId().id(), anyOf(equalTo(0), equalTo(1)));
+        assertFalse(routing.primary());
+        // finally the primary
+        routing = iter.nextOrNull();
+        assertThat(routing.shardId().id(), anyOf(equalTo(0), equalTo(1)));
+        assertTrue(routing.primary());
+    }
+
 }

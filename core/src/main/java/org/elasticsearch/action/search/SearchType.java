@@ -20,6 +20,7 @@
 package org.elasticsearch.action.search;
 
 import org.elasticsearch.common.ParseField;
+import org.elasticsearch.common.ParseFieldMatcher;
 
 /**
  * Search type represent the manner at which the search operation is executed.
@@ -53,7 +54,9 @@ public enum SearchType {
     /**
      * Performs scanning of the results which executes the search without any sorting.
      * It will automatically start scrolling the result set.
+     * @deprecated will be removed in 3.0, you should do a regular scroll instead, ordered by `_doc`
      */
+    @Deprecated
     SCAN((byte) 4),
     /**
      * Only counts the results, will still execute aggregations and the like.
@@ -68,6 +71,7 @@ public enum SearchType {
     public static final SearchType DEFAULT = QUERY_THEN_FETCH;
 
     private static final ParseField COUNT_VALUE = new ParseField("count").withAllDeprecated("query_then_fetch");
+    private static final ParseField SCAN_VALUE = new ParseField("scan").withAllDeprecated("query_then_fetch sorting on `_doc`");
 
     private byte id;
 
@@ -108,7 +112,7 @@ public enum SearchType {
      * one of "dfs_query_then_fetch"/"dfsQueryThenFetch", "dfs_query_and_fetch"/"dfsQueryAndFetch",
      * "query_then_fetch"/"queryThenFetch", "query_and_fetch"/"queryAndFetch", and "scan".
      */
-    public static SearchType fromString(String searchType) {
+    public static SearchType fromString(String searchType, ParseFieldMatcher parseFieldMatcher) {
         if (searchType == null) {
             return SearchType.DEFAULT;
         }
@@ -120,9 +124,9 @@ public enum SearchType {
             return SearchType.QUERY_THEN_FETCH;
         } else if ("query_and_fetch".equals(searchType)) {
             return SearchType.QUERY_AND_FETCH;
-        } else if ("scan".equals(searchType)) {
+        } else if (parseFieldMatcher.match(searchType, SCAN_VALUE)) {
             return SearchType.SCAN;
-        } else if (COUNT_VALUE.match(searchType)) {
+        } else if (parseFieldMatcher.match(searchType, COUNT_VALUE)) {
             return SearchType.COUNT;
         } else {
             throw new IllegalArgumentException("No search type for [" + searchType + "]");

@@ -29,7 +29,7 @@ import org.elasticsearch.index.mapper.DocumentMapper;
 import org.elasticsearch.index.mapper.DocumentMapperParser;
 import org.elasticsearch.index.mapper.FieldMapper;
 import org.elasticsearch.index.mapper.MergeResult;
-import org.elasticsearch.test.ElasticsearchSingleNodeTest;
+import org.elasticsearch.test.ESSingleNodeTestCase;
 import org.junit.Test;
 
 import java.io.IOException;
@@ -40,7 +40,7 @@ import static org.hamcrest.Matchers.equalTo;
 import static org.hamcrest.Matchers.instanceOf;
 import static org.hamcrest.Matchers.isIn;
 
-public class GeoShapeFieldMapperTests extends ElasticsearchSingleNodeTest {
+public class GeoShapeFieldMapperTests extends ESSingleNodeTestCase {
 
     @Test
     public void testDefaultConfiguration() throws IOException {
@@ -100,6 +100,41 @@ public class GeoShapeFieldMapperTests extends ElasticsearchSingleNodeTest {
         assertThat(orientation, equalTo(ShapeBuilder.Orientation.COUNTER_CLOCKWISE));
         assertThat(orientation, equalTo(ShapeBuilder.Orientation.RIGHT));
         assertThat(orientation, equalTo(ShapeBuilder.Orientation.CCW));
+    }
+
+    /**
+     * Test that orientation parameter correctly parses
+     * @throws IOException
+     */
+    public void testCoerceParsing() throws IOException {
+        String mapping = XContentFactory.jsonBuilder().startObject().startObject("type1")
+                .startObject("properties").startObject("location")
+                .field("type", "geo_shape")
+                .field("coerce", "true")
+                .endObject().endObject()
+                .endObject().endObject().string();
+
+        DocumentMapper defaultMapper = createIndex("test").mapperService().documentMapperParser().parse(mapping);
+        FieldMapper fieldMapper = defaultMapper.mappers().getMapper("location");
+        assertThat(fieldMapper, instanceOf(GeoShapeFieldMapper.class));
+
+        boolean coerce = ((GeoShapeFieldMapper)fieldMapper).coerce().value();
+        assertThat(coerce, equalTo(true));
+
+        // explicit false coerce test
+        mapping = XContentFactory.jsonBuilder().startObject().startObject("type1")
+                .startObject("properties").startObject("location")
+                .field("type", "geo_shape")
+                .field("coerce", "false")
+                .endObject().endObject()
+                .endObject().endObject().string();
+
+        defaultMapper = createIndex("test2").mapperService().documentMapperParser().parse(mapping);
+        fieldMapper = defaultMapper.mappers().getMapper("location");
+        assertThat(fieldMapper, instanceOf(GeoShapeFieldMapper.class));
+
+        coerce = ((GeoShapeFieldMapper)fieldMapper).coerce().value();
+        assertThat(coerce, equalTo(false));
     }
 
     @Test

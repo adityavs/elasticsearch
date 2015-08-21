@@ -28,18 +28,17 @@ import org.elasticsearch.common.unit.ByteSizeUnit;
 import org.elasticsearch.indices.breaker.HierarchyCircuitBreakerService;
 import org.elasticsearch.indices.breaker.NoneCircuitBreakerService;
 import org.elasticsearch.node.settings.NodeSettingsService;
-import org.elasticsearch.test.ElasticsearchSingleNodeTest;
-import org.elasticsearch.test.cache.recycler.MockBigArrays;
+import org.elasticsearch.test.ESSingleNodeTestCase;
 import org.junit.Before;
 
 import java.lang.reflect.InvocationTargetException;
 import java.lang.reflect.Method;
 import java.util.Arrays;
 
-public class BigArraysTests extends ElasticsearchSingleNodeTest {
+public class BigArraysTests extends ESSingleNodeTestCase {
 
     public static BigArrays randombigArrays() {
-        final PageCacheRecycler recycler = randomBoolean() ? null : ElasticsearchSingleNodeTest.getInstanceFromNode(PageCacheRecycler.class);
+        final PageCacheRecycler recycler = randomBoolean() ? null : ESSingleNodeTestCase.getInstanceFromNode(PageCacheRecycler.class);
         return new MockBigArrays(recycler, new NoneCircuitBreakerService());
     }
 

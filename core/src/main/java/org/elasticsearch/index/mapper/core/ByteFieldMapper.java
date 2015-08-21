@@ -30,7 +30,6 @@ import org.apache.lucene.util.BytesRefBuilder;
 import org.apache.lucene.util.NumericUtils;
 import org.elasticsearch.action.fieldstats.FieldStats;
 import org.elasticsearch.common.Explicit;
-import org.elasticsearch.common.Nullable;
 import org.elasticsearch.common.Strings;
 import org.elasticsearch.common.settings.Settings;
 import org.elasticsearch.common.unit.Fuzziness;
@@ -38,15 +37,10 @@ import org.elasticsearch.common.xcontent.XContentBuilder;
 import org.elasticsearch.common.xcontent.XContentParser;
 import org.elasticsearch.index.analysis.NamedAnalyzer;
 import org.elasticsearch.index.analysis.NumericIntegerAnalyzer;
-import org.elasticsearch.index.fielddata.FieldDataType;
 import org.elasticsearch.index.mapper.MappedFieldType;
 import org.elasticsearch.index.mapper.Mapper;
 import org.elasticsearch.index.mapper.MapperParsingException;
-import org.elasticsearch.index.mapper.MergeMappingException;
-import org.elasticsearch.index.mapper.MergeResult;
 import org.elasticsearch.index.mapper.ParseContext;
-import org.elasticsearch.index.query.QueryParseContext;
-
 import java.io.IOException;
 import java.util.Iterator;
 import java.util.List;
@@ -81,8 +75,8 @@ public class ByteFieldMapper extends NumberFieldMapper {
         @Override
         public ByteFieldMapper build(BuilderContext context) {
             setupFieldType(context);
-            ByteFieldMapper fieldMapper = new ByteFieldMapper(fieldType, docValues, ignoreMalformed(context),
-                    coerce(context), fieldDataSettings, context.indexSettings(), multiFieldsBuilder.build(this, context), copyTo);
+            ByteFieldMapper fieldMapper = new ByteFieldMapper(name, fieldType, defaultFieldType, ignoreMalformed(context),
+                    coerce(context), context.indexSettings(), multiFieldsBuilder.build(this, context), copyTo);
             fieldMapper.includeInAll(includeInAll);
             return fieldMapper;
         }
@@ -166,7 +160,7 @@ public class ByteFieldMapper extends NumberFieldMapper {
         }
 
         @Override
-        public Query rangeQuery(Object lowerTerm, Object upperTerm, boolean includeLower, boolean includeUpper, @Nullable QueryParseContext context) {
+        public Query rangeQuery(Object lowerTerm, Object upperTerm, boolean includeLower, boolean includeUpper) {
             return NumericRangeQuery.newIntRange(names().indexName(), numericPrecisionStep(),
                 lowerTerm == null ? null : (int)parseValue(lowerTerm),
                 upperTerm == null ? null : (int)parseValue(upperTerm),
@@ -174,8 +168,8 @@ public class ByteFieldMapper extends NumberFieldMapper {
         }
 
         @Override
-        public Query fuzzyQuery(String value, Fuzziness fuzziness, int prefixLength, int maxExpansions, boolean transpositions) {
-            byte iValue = Byte.parseByte(value);
+        public Query fuzzyQuery(Object value, Fuzziness fuzziness, int prefixLength, int maxExpansions, boolean transpositions) {
+            byte iValue = parseValue(value);
             byte iSim = fuzziness.asByte();
             return NumericRangeQuery.newIntRange(names().indexName(), numericPrecisionStep(),
                 iValue - iSim,
@@ -193,25 +187,15 @@ public class ByteFieldMapper extends NumberFieldMapper {
         }
     }
 
-    protected ByteFieldMapper(MappedFieldType fieldType, Boolean docValues,
+    protected ByteFieldMapper(String simpleName, MappedFieldType fieldType, MappedFieldType defaultFieldType,
                               Explicit<Boolean> ignoreMalformed, Explicit<Boolean> coerce,
-                              @Nullable Settings fieldDataSettings, Settings indexSettings, MultiFields multiFields, CopyTo copyTo) {
-        super(fieldType, docValues, ignoreMalformed, coerce, fieldDataSettings, indexSettings, multiFields, copyTo);
+                              Settings indexSettings, MultiFields multiFields, CopyTo copyTo) {
+        super(simpleName, fieldType, defaultFieldType, ignoreMalformed, coerce, indexSettings, multiFields, copyTo);
     }
 
     @Override
     public ByteFieldType fieldType() {
         return (ByteFieldType) super.fieldType();
-    }
-
-    @Override
-    public MappedFieldType defaultFieldType() {
-        return Defaults.FIELD_TYPE;
-    }
-
-    @Override
-    public FieldDataType defaultFieldDataType() {
-        return new FieldDataType("byte");
     }
 
     private static byte parseValue(Object value) {
@@ -299,7 +283,7 @@ public class ByteFieldMapper extends NumberFieldMapper {
             }
         }
         if (fieldType().indexOptions() != IndexOptions.NONE || fieldType().stored()) {
-            CustomByteNumericField field = new CustomByteNumericField(this, value, fieldType());
+            CustomByteNumericField field = new CustomByteNumericField(value, fieldType());
             field.setBoost(boost);
             fields.add(field);
         }
@@ -334,18 +318,15 @@ public class ByteFieldMapper extends NumberFieldMapper {
 
         private final byte number;
 
-        private final NumberFieldMapper mapper;
-
-        public CustomByteNumericField(NumberFieldMapper mapper, byte number, MappedFieldType fieldType) {
-            super(mapper, number, fieldType);
-            this.mapper = mapper;
+        public CustomByteNumericField(byte number, MappedFieldType fieldType) {
+            super(number, fieldType);
             this.number = number;
         }
 
         @Override
         public TokenStream tokenStream(Analyzer analyzer, TokenStream previous) {
             if (fieldType().indexOptions() != IndexOptions.NONE) {
-                return mapper.popCachedStream().setIntValue(number);
+                return getCachedStream().setIntValue(number);
             }
             return null;
         }

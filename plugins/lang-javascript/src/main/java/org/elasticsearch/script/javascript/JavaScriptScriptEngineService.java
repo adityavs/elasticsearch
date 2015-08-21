@@ -105,7 +105,7 @@ public class JavaScriptScriptEngineService extends AbstractComponent implements 
     }
 
     @Override
-    public ExecutableScript executable(Object compiledScript, Map<String, Object> vars) {
+    public ExecutableScript executable(CompiledScript compiledScript, Map<String, Object> vars) {
         Context ctx = Context.enter();
         try {
             ctx.setWrapFactory(wrapFactory);
@@ -117,14 +117,14 @@ public class JavaScriptScriptEngineService extends AbstractComponent implements 
                 ScriptableObject.putProperty(scope, entry.getKey(), entry.getValue());
             }
 
-            return new JavaScriptExecutableScript((Script) compiledScript, scope);
+            return new JavaScriptExecutableScript((Script) compiledScript.compiled(), scope);
         } finally {
             Context.exit();
         }
     }
 
     @Override
-    public SearchScript search(final Object compiledScript, final SearchLookup lookup, @Nullable final Map<String, Object> vars) {
+    public SearchScript search(final CompiledScript compiledScript, final SearchLookup lookup, @Nullable final Map<String, Object> vars) {
         Context ctx = Context.enter();
         try {
             ctx.setWrapFactory(wrapFactory);
@@ -148,7 +148,13 @@ public class JavaScriptScriptEngineService extends AbstractComponent implements 
                     }
                 }
 
-                return new JavaScriptSearchScript((Script) compiledScript, scope, leafLookup);
+                return new JavaScriptSearchScript((Script) compiledScript.compiled(), scope, leafLookup);
+              }
+
+              @Override
+              public boolean needsScores() {
+                  // TODO: can we reliably know if a javascript script makes use of _score
+                  return true;
               }
             };
         } finally {
@@ -157,11 +163,11 @@ public class JavaScriptScriptEngineService extends AbstractComponent implements 
     }
 
     @Override
-    public Object execute(Object compiledScript, Map<String, Object> vars) {
+    public Object execute(CompiledScript compiledScript, Map<String, Object> vars) {
         Context ctx = Context.enter();
         ctx.setWrapFactory(wrapFactory);
         try {
-            Script script = (Script) compiledScript;
+            Script script = (Script) compiledScript.compiled();
             Scriptable scope = ctx.newObject(globalScope);
             scope.setPrototype(globalScope);
             scope.setParentScope(null);

@@ -19,7 +19,7 @@
 
 package org.elasticsearch.cluster;
 
-import com.google.common.collect.ImmutableMap;
+import org.elasticsearch.ElasticsearchException;
 import org.elasticsearch.action.ActionListener;
 import org.elasticsearch.action.LatchedActionListener;
 import org.elasticsearch.action.admin.cluster.node.stats.NodeStats;
@@ -32,14 +32,14 @@ import org.elasticsearch.action.admin.indices.stats.ShardStats;
 import org.elasticsearch.action.admin.indices.stats.TransportIndicesStatsAction;
 import org.elasticsearch.cluster.block.ClusterBlockException;
 import org.elasticsearch.cluster.node.DiscoveryNode;
-import org.elasticsearch.cluster.routing.ShardRouting;
 import org.elasticsearch.cluster.routing.allocation.decider.DiskThresholdDecider;
 import org.elasticsearch.common.component.AbstractComponent;
 import org.elasticsearch.common.inject.Inject;
 import org.elasticsearch.common.settings.Settings;
 import org.elasticsearch.common.unit.TimeValue;
+import org.elasticsearch.common.util.concurrent.AbstractRunnable;
 import org.elasticsearch.common.util.concurrent.EsRejectedExecutionException;
-import org.elasticsearch.monitor.fs.FsStats;
+import org.elasticsearch.monitor.fs.FsInfo;
 import org.elasticsearch.node.settings.NodeSettingsService;
 import org.elasticsearch.threadpool.ThreadPool;
 import org.elasticsearch.transport.ReceiveTimeoutTransportException;
@@ -47,6 +47,7 @@ import org.elasticsearch.transport.ReceiveTimeoutTransportException;
 import java.util.*;
 import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.TimeUnit;
+import java.util.concurrent.atomic.AtomicReference;
 
 /**
  * InternalClusterInfoService provides the ClusterInfoService interface,
@@ -66,8 +67,8 @@ public class InternalClusterInfoService extends AbstractComponent implements Clu
 
     private volatile TimeValue updateFrequency;
 
-    private volatile ImmutableMap<String, DiskUsage> usages;
-    private volatile ImmutableMap<String, Long> shardSizes;
+    private volatile Map<String, DiskUsage> usages;
+    private volatile Map<String, Long> shardSizes;
     private volatile boolean isMaster = false;
     private volatile boolean enabled;
     private volatile TimeValue fetchTimeout;
@@ -83,8 +84,8 @@ public class InternalClusterInfoService extends AbstractComponent implements Clu
                                       TransportIndicesStatsAction transportIndicesStatsAction, ClusterService clusterService,
                                       ThreadPool threadPool) {
         super(settings);
-        this.usages = ImmutableMap.of();
-        this.shardSizes = ImmutableMap.of();
+        this.usages = Collections.emptyMap();
+        this.shardSizes = Collections.emptyMap();
         this.transportNodesStatsAction = transportNodesStatsAction;
         this.transportIndicesStatsAction = transportIndicesStatsAction;
         this.clusterService = clusterService;
@@ -201,7 +202,7 @@ public class InternalClusterInfoService extends AbstractComponent implements Clu
                     }
                     Map<String, DiskUsage> newUsages = new HashMap<>(usages);
                     newUsages.remove(removedNode.getId());
-                    usages = ImmutableMap.copyOf(newUsages);
+                    usages = Collections.unmodifiableMap(newUsages);
                 }
             }
         }
@@ -320,7 +321,7 @@ public class InternalClusterInfoService extends AbstractComponent implements Clu
                             long available = 0;
                             long total = 0;
 
-                            for (FsStats.Info info : nodeStats.getFs()) {
+                            for (FsInfo.Path info : nodeStats.getFs()) {
                                 available += info.getAvailable().bytes();
                                 total += info.getTotal().bytes();
                             }
@@ -332,7 +333,7 @@ public class InternalClusterInfoService extends AbstractComponent implements Clu
                             newUsages.put(nodeId, new DiskUsage(nodeId, nodeName, total, available));
                         }
                     }
-                    usages = ImmutableMap.copyOf(newUsages);
+                    usages = Collections.unmodifiableMap(newUsages);
                 }
 
                 @Override
@@ -348,7 +349,7 @@ public class InternalClusterInfoService extends AbstractComponent implements Clu
                             logger.warn("Failed to execute NodeStatsAction for ClusterInfoUpdateJob", e);
                         }
                         // we empty the usages list, to be safe - we don't know what's going on.
-                        usages = ImmutableMap.of();
+                        usages = Collections.emptyMap();
                     }
                 }
             });
@@ -360,13 +361,13 @@ public class InternalClusterInfoService extends AbstractComponent implements Clu
                     HashMap<String, Long> newShardSizes = new HashMap<>();
                     for (ShardStats s : stats) {
                         long size = s.getStats().getStore().sizeInBytes();
-                        String sid = shardIdentifierFromRouting(s.getShardRouting());
+                        String sid = ClusterInfo.shardIdentifierFromRouting(s.getShardRouting());
                         if (logger.isTraceEnabled()) {
                             logger.trace("shard: {} size: {}", sid, size);
                         }
                         newShardSizes.put(sid, size);
                     }
-                    shardSizes = ImmutableMap.copyOf(newShardSizes);
+                    shardSizes = Collections.unmodifiableMap(newShardSizes);
                 }
 
                 @Override
@@ -382,7 +383,7 @@ public class InternalClusterInfoService extends AbstractComponent implements Clu
                             logger.warn("Failed to execute IndicesStatsAction for ClusterInfoUpdateJob", e);
                         }
                         // we empty the usages list, to be safe - we don't know what's going on.
-                        shardSizes = ImmutableMap.of();
+                        shardSizes = Collections.emptyMap();
                     }
                 }
             });
@@ -411,11 +412,5 @@ public class InternalClusterInfoService extends AbstractComponent implements Clu
         }
     }
 
-    /**
-     * Method that incorporates the ShardId for the shard into a string that
-     * includes a 'p' or 'r' depending on whether the shard is a primary.
-     */
-    public static String shardIdentifierFromRouting(ShardRouting shardRouting) {
-        return shardRouting.shardId().toString() + "[" + (shardRouting.primary() ? "p" : "r") + "]";
-    }
+
 }

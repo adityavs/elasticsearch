@@ -22,6 +22,7 @@ package org.elasticsearch.index.store;
 import com.google.common.collect.Sets;
 import org.apache.lucene.store.*;
 import org.apache.lucene.util.Constants;
+import org.elasticsearch.ElasticsearchException;
 import org.elasticsearch.common.inject.Inject;
 import org.elasticsearch.common.metrics.CounterMetric;
 import org.elasticsearch.common.settings.Settings;
@@ -32,6 +33,7 @@ import java.io.IOException;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.util.Collections;
+import java.util.Locale;
 import java.util.Set;
 
 /**
@@ -74,11 +76,7 @@ public class FsDirectoryService extends DirectoryService implements StoreRateLim
     }
 
     protected final LockFactory buildLockFactory() throws IOException {
-        try {
-            return buildLockFactory(indexSettings);
-        } catch (IllegalArgumentException e) {
-            throw new StoreException(shardId, "unable to build lock factory", e);
-        }
+        return buildLockFactory(indexSettings);
     }
 
     @Override
@@ -104,7 +102,7 @@ public class FsDirectoryService extends DirectoryService implements StoreRateLim
 
 
     protected Directory newFSDirectory(Path location, LockFactory lockFactory) throws IOException {
-        final String storeType = indexSettings.get(IndexStoreModule.STORE_TYPE, IndexStoreModule.Type.DEFAULT.name());
+        final String storeType = indexSettings.get(IndexStoreModule.STORE_TYPE, IndexStoreModule.Type.DEFAULT.getSettingsKey());
         if (IndexStoreModule.Type.FS.match(storeType) || IndexStoreModule.Type.DEFAULT.match(storeType)) {
             final FSDirectory open = FSDirectory.open(location, lockFactory); // use lucene defaults
             if (open instanceof MMapDirectory && Constants.WINDOWS == false) {

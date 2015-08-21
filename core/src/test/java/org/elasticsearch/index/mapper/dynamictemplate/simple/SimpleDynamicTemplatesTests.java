@@ -27,18 +27,18 @@ import org.elasticsearch.common.xcontent.json.JsonXContent;
 import org.elasticsearch.index.IndexService;
 import org.elasticsearch.index.mapper.*;
 import org.elasticsearch.index.mapper.ParseContext.Document;
-import org.elasticsearch.test.ElasticsearchSingleNodeTest;
+import org.elasticsearch.test.ESSingleNodeTestCase;
 import org.hamcrest.Matchers;
 import org.junit.Test;
 
-import static org.elasticsearch.common.io.Streams.copyToBytesFromClasspath;
-import static org.elasticsearch.common.io.Streams.copyToStringFromClasspath;
+import static org.elasticsearch.test.StreamsUtils.copyToBytesFromClasspath;
+import static org.elasticsearch.test.StreamsUtils.copyToStringFromClasspath;
 import static org.hamcrest.Matchers.equalTo;
 
 /**
  *
  */
-public class SimpleDynamicTemplatesTests extends ElasticsearchSingleNodeTest {
+public class SimpleDynamicTemplatesTests extends ESSingleNodeTestCase {
 
     @Test
     public void testMatchTypeOnly() throws Exception {
@@ -52,7 +52,7 @@ public class SimpleDynamicTemplatesTests extends ElasticsearchSingleNodeTest {
         DocumentMapper docMapper = index.mapperService().documentMapper("person");
         builder = JsonXContent.contentBuilder();
         builder.startObject().field("s", "hello").field("l", 1).endObject();
-        ParsedDocument parsedDoc = docMapper.parse("person", "1", builder.bytes());
+        ParsedDocument parsedDoc = docMapper.parse("test", "person", "1", builder.bytes());
         client().admin().indices().preparePutMapping("test").setType("person").setSource(parsedDoc.dynamicMappingsUpdate().toString()).get();
 
         DocumentFieldMappers mappers = docMapper.mappers();
@@ -74,7 +74,7 @@ public class SimpleDynamicTemplatesTests extends ElasticsearchSingleNodeTest {
         client().admin().indices().preparePutMapping("test").setType("person").setSource(mapping).get();
         DocumentMapper docMapper = index.mapperService().documentMapper("person");
         byte[] json = copyToBytesFromClasspath("/org/elasticsearch/index/mapper/dynamictemplate/simple/test-data.json");
-        ParsedDocument parsedDoc = docMapper.parse("person", "1", new BytesArray(json));
+        ParsedDocument parsedDoc = docMapper.parse("test", "person", "1", new BytesArray(json));
         client().admin().indices().preparePutMapping("test").setType("person").setSource(parsedDoc.dynamicMappingsUpdate().toString()).get();
         Document doc = parsedDoc.rootDoc();
 
@@ -131,7 +131,7 @@ public class SimpleDynamicTemplatesTests extends ElasticsearchSingleNodeTest {
         client().admin().indices().preparePutMapping("test").setType("person").setSource(mapping).get();
         DocumentMapper docMapper = index.mapperService().documentMapper("person");
         byte[] json = copyToBytesFromClasspath("/org/elasticsearch/index/mapper/dynamictemplate/simple/test-data.json");
-        ParsedDocument parsedDoc = docMapper.parse("person", "1", new BytesArray(json));
+        ParsedDocument parsedDoc = docMapper.parse("test", "person", "1", new BytesArray(json));
         client().admin().indices().preparePutMapping("test").setType("person").setSource(parsedDoc.dynamicMappingsUpdate().toString()).get();
         Document doc = parsedDoc.rootDoc();
 

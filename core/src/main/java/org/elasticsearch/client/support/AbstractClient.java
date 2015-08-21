@@ -176,6 +176,10 @@ import org.elasticsearch.action.admin.indices.settings.put.UpdateSettingsAction;
 import org.elasticsearch.action.admin.indices.settings.put.UpdateSettingsRequest;
 import org.elasticsearch.action.admin.indices.settings.put.UpdateSettingsRequestBuilder;
 import org.elasticsearch.action.admin.indices.settings.put.UpdateSettingsResponse;
+import org.elasticsearch.action.admin.indices.shards.IndicesShardStoreRequestBuilder;
+import org.elasticsearch.action.admin.indices.shards.IndicesShardStoresResponse;
+import org.elasticsearch.action.admin.indices.shards.IndicesShardStoresAction;
+import org.elasticsearch.action.admin.indices.shards.IndicesShardStoresRequest;
 import org.elasticsearch.action.admin.indices.stats.IndicesStatsAction;
 import org.elasticsearch.action.admin.indices.stats.IndicesStatsRequest;
 import org.elasticsearch.action.admin.indices.stats.IndicesStatsRequestBuilder;
@@ -204,6 +208,10 @@ import org.elasticsearch.action.admin.indices.validate.query.ValidateQueryAction
 import org.elasticsearch.action.admin.indices.validate.query.ValidateQueryRequest;
 import org.elasticsearch.action.admin.indices.validate.query.ValidateQueryRequestBuilder;
 import org.elasticsearch.action.admin.indices.validate.query.ValidateQueryResponse;
+import org.elasticsearch.action.admin.indices.validate.template.RenderSearchTemplateAction;
+import org.elasticsearch.action.admin.indices.validate.template.RenderSearchTemplateRequest;
+import org.elasticsearch.action.admin.indices.validate.template.RenderSearchTemplateRequestBuilder;
+import org.elasticsearch.action.admin.indices.validate.template.RenderSearchTemplateResponse;
 import org.elasticsearch.action.admin.indices.warmer.delete.DeleteWarmerAction;
 import org.elasticsearch.action.admin.indices.warmer.delete.DeleteWarmerRequest;
 import org.elasticsearch.action.admin.indices.warmer.delete.DeleteWarmerRequestBuilder;
@@ -1495,6 +1503,21 @@ public abstract class AbstractClient extends AbstractComponent implements Client
         }
 
         @Override
+        public ActionFuture<IndicesShardStoresResponse> shardStores(IndicesShardStoresRequest request) {
+            return execute(IndicesShardStoresAction.INSTANCE, request);
+        }
+
+        @Override
+        public void shardStores(IndicesShardStoresRequest request, ActionListener<IndicesShardStoresResponse> listener) {
+            execute(IndicesShardStoresAction.INSTANCE, request, listener);
+        }
+
+        @Override
+        public IndicesShardStoreRequestBuilder prepareShardStores(String... indices) {
+            return new IndicesShardStoreRequestBuilder(this, IndicesShardStoresAction.INSTANCE, indices);
+        }
+
+        @Override
         public ActionFuture<UpdateSettingsResponse> updateSettings(final UpdateSettingsRequest request) {
             return execute(UpdateSettingsAction.INSTANCE, request);
         }
@@ -1592,6 +1615,21 @@ public abstract class AbstractClient extends AbstractComponent implements Client
         @Override
         public ValidateQueryRequestBuilder prepareValidateQuery(String... indices) {
             return new ValidateQueryRequestBuilder(this, ValidateQueryAction.INSTANCE).setIndices(indices);
+        }
+
+        @Override
+        public ActionFuture<RenderSearchTemplateResponse> renderSearchTemplate(final RenderSearchTemplateRequest request) {
+            return execute(RenderSearchTemplateAction.INSTANCE, request);
+        }
+
+        @Override
+        public void renderSearchTemplate(final RenderSearchTemplateRequest request, final ActionListener<RenderSearchTemplateResponse> listener) {
+            execute(RenderSearchTemplateAction.INSTANCE, request, listener);
+        }
+
+        @Override
+        public RenderSearchTemplateRequestBuilder prepareRenderSearchTemplate() {
+            return new RenderSearchTemplateRequestBuilder(this, RenderSearchTemplateAction.INSTANCE);
         }
 
         @Override

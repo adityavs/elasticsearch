@@ -34,7 +34,7 @@ import org.elasticsearch.common.xcontent.XContentFactory;
 import org.elasticsearch.index.fieldvisitor.CustomFieldsVisitor;
 import org.elasticsearch.index.mapper.DocumentMapper;
 import org.elasticsearch.index.mapper.ParsedDocument;
-import org.elasticsearch.test.ElasticsearchSingleNodeTest;
+import org.elasticsearch.test.ESSingleNodeTestCase;
 import org.junit.Test;
 
 import java.util.Arrays;
@@ -46,7 +46,7 @@ import static org.hamcrest.Matchers.equalTo;
 /**
  *
  */
-public class StoredNumericValuesTest extends ElasticsearchSingleNodeTest {
+public class StoredNumericValuesTest extends ESSingleNodeTestCase {
 
     @Test
     public void testBytesAndNumericRepresentation() throws Exception {
@@ -65,7 +65,7 @@ public class StoredNumericValuesTest extends ElasticsearchSingleNodeTest {
                 .string();
         DocumentMapper mapper = createIndex("test").mapperService().documentMapperParser().parse(mapping);
 
-        ParsedDocument doc = mapper.parse("type", "1", XContentFactory.jsonBuilder()
+        ParsedDocument doc = mapper.parse("test", "type", "1", XContentFactory.jsonBuilder()
                 .startObject()
                     .field("field1", 1)
                     .field("field2", 1.1)

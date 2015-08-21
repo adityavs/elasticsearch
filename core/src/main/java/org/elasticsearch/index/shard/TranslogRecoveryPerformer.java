@@ -90,12 +90,13 @@ public class TranslogRecoveryPerformer {
         return numOps;
     }
 
-    public static class BatchOperationException extends IndexShardException {
+    public static class BatchOperationException extends ElasticsearchException {
 
         private final int completedOperations;
 
         public BatchOperationException(ShardId shardId, String msg, int completedOperations, Throwable cause) {
-            super(shardId, msg, cause);
+            super(msg, cause);
+            setShard(shardId);
             this.completedOperations = completedOperations;
         }
 
@@ -144,7 +145,7 @@ public class TranslogRecoveryPerformer {
                 case CREATE:
                     Translog.Create create = (Translog.Create) operation;
                     Engine.Create engineCreate = IndexShard.prepareCreate(docMapper(create.type()),
-                            source(create.source()).type(create.type()).id(create.id())
+                            source(create.source()).index(shardId.getIndex()).type(create.type()).id(create.id())
                                     .routing(create.routing()).parent(create.parent()).timestamp(create.timestamp()).ttl(create.ttl()),
                             create.version(), create.versionType().versionTypeForReplicationAndRecovery(), Engine.Operation.Origin.RECOVERY, true, false);
                     maybeAddMappingUpdate(engineCreate.type(), engineCreate.parsedDoc().dynamicMappingsUpdate(), engineCreate.id(), allowMappingUpdates);
@@ -203,7 +204,7 @@ public class TranslogRecoveryPerformer {
             query = queryParserService.parseQuery(source).query();
         } catch (QueryParsingException ex) {
             // for BWC we try to parse directly the query since pre 1.0.0.Beta2 we didn't require a top level query field
-            if ( queryParserService.getIndexCreatedVersion().onOrBefore(Version.V_1_0_0_Beta2)) {
+            if (queryParserService.getIndexCreatedVersion().onOrBefore(Version.V_1_0_0_Beta2)) {
                 try {
                     XContentParser parser = XContentHelper.createParser(source);
                     ParsedQuery parse = queryParserService.parse(parser);

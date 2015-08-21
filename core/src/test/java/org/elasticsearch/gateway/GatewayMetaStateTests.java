@@ -29,7 +29,7 @@ import org.elasticsearch.cluster.node.DiscoveryNodes;
 import org.elasticsearch.cluster.routing.RoutingTable;
 import org.elasticsearch.cluster.routing.allocation.AllocationService;
 import org.elasticsearch.cluster.routing.allocation.decider.ClusterRebalanceAllocationDecider;
-import org.elasticsearch.test.ElasticsearchAllocationTestCase;
+import org.elasticsearch.test.ESAllocationTestCase;
 import org.junit.Test;
 
 import java.util.*;
@@ -49,7 +49,7 @@ import static org.hamcrest.Matchers.equalTo;
  * - node is master eligible
  * for data only nodes: shard initializing on shard
  */
-public class GatewayMetaStateTests extends ElasticsearchAllocationTestCase {
+public class GatewayMetaStateTests extends ESAllocationTestCase {
 
     ClusterChangedEvent generateEvent(boolean initializing, boolean versionChanged, boolean masterEligible) {
         //ridiculous settings to make sure we don't run into uninitialized because fo default
@@ -174,9 +174,9 @@ public class GatewayMetaStateTests extends ElasticsearchAllocationTestCase {
         if (stateInMemory) {
             inMemoryMetaData = event.previousState().metaData();
             ImmutableSet.Builder<String> relevantIndices = ImmutableSet.builder();
-            oldIndicesList = relevantIndices.addAll(GatewayMetaState.getRelevantIndices(event.previousState(), oldIndicesList)).build();
+            oldIndicesList = relevantIndices.addAll(GatewayMetaState.getRelevantIndices(event.previousState(), event.previousState(), oldIndicesList)).build();
         }
-        Set<String> newIndicesList = GatewayMetaState.getRelevantIndices(event.state(), oldIndicesList);
+        Set<String> newIndicesList = GatewayMetaState.getRelevantIndices(event.state(),event.previousState(), oldIndicesList);
         // third, get the actual write info
         Iterator<GatewayMetaState.IndexMetaWriteInfo> indices = GatewayMetaState.resolveStatesToBeWritten(oldIndicesList, newIndicesList, inMemoryMetaData, event.state().metaData()).iterator();
 

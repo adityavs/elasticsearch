@@ -22,6 +22,7 @@ package org.elasticsearch.env;
 import com.google.common.collect.ImmutableSet;
 import com.google.common.collect.Sets;
 
+import com.google.common.primitives.Ints;
 import org.apache.lucene.index.IndexWriter;
 import org.apache.lucene.index.SegmentInfos;
 import org.apache.lucene.store.*;
@@ -29,6 +30,7 @@ import org.apache.lucene.util.IOUtils;
 import org.elasticsearch.ElasticsearchException;
 import org.elasticsearch.cluster.metadata.IndexMetaData;
 import org.elasticsearch.cluster.node.DiscoveryNode;
+import org.elasticsearch.common.Nullable;
 import org.elasticsearch.common.SuppressForbidden;
 import org.elasticsearch.common.component.AbstractComponent;
 import org.elasticsearch.common.inject.Inject;
@@ -41,8 +43,8 @@ import org.elasticsearch.index.Index;
 import org.elasticsearch.index.settings.IndexSettings;
 import org.elasticsearch.index.shard.ShardId;
 import org.elasticsearch.index.store.FsDirectoryService;
-import org.elasticsearch.monitor.fs.FsStats;
-import org.elasticsearch.monitor.fs.JmxFsProbe;
+import org.elasticsearch.monitor.fs.FsInfo;
+import org.elasticsearch.monitor.fs.FsProbe;
 
 import java.io.Closeable;
 import java.io.IOException;
@@ -103,6 +105,7 @@ public class NodeEnvironment extends AbstractComponent implements Closeable {
     }
 
     private final NodePath[] nodePaths;
+    private final Path sharedDataPath;
     private final Lock[] locks;
 
     private final boolean addNodeId;
@@ -111,12 +114,8 @@ public class NodeEnvironment extends AbstractComponent implements Closeable {
     private final AtomicBoolean closed = new AtomicBoolean(false);
     private final Map<ShardId, InternalShardLock> shardLocks = new HashMap<>();
 
-    private final boolean customPathsEnabled;
-
     // Setting to automatically append node id to custom data paths
     public static final String ADD_NODE_ID_TO_CUSTOM_PATH = "node.add_id_to_custom_path";
-    // Setting to enable custom index.data_path setting for new indices
-    public static final String SETTING_CUSTOM_DATA_PATH_ENABLED = "node.enable_custom_paths";
 
     // If enabled, the [verbose] SegmentInfos.infoStream logging is sent to System.out:
     public static final String SETTING_ENABLE_LUCENE_SEGMENT_INFOS_TRACE = "node.enable_lucene_segment_infos_trace";
@@ -131,10 +130,10 @@ public class NodeEnvironment extends AbstractComponent implements Closeable {
         super(settings);
 
         this.addNodeId = settings.getAsBoolean(ADD_NODE_ID_TO_CUSTOM_PATH, true);
-        this.customPathsEnabled = settings.getAsBoolean(SETTING_CUSTOM_DATA_PATH_ENABLED, false);
 
         if (!DiscoveryNode.nodeRequiresLocalStorage(settings)) {
             nodePaths = null;
+            sharedDataPath = null;
             locks = null;
             localNodeId = -1;
             return;
@@ -142,6 +141,7 @@ public class NodeEnvironment extends AbstractComponent implements Closeable {
 
         final NodePath[] nodePaths = new NodePath[environment.dataWithClusterFiles().length];
         final Lock[] locks = new Lock[nodePaths.length];
+        sharedDataPath = environment.sharedDataFile();
 
         int localNodeId = -1;
         IOException lastException = null;
@@ -225,38 +225,37 @@ public class NodeEnvironment extends AbstractComponent implements Closeable {
                     spinsDesc = "no";
                 }
 
-                FsStats.Info fsInfo = JmxFsProbe.getFSInfo(nodePath);
+                FsInfo.Path fsPath = FsProbe.getFSInfo(nodePath);
                 sb.append(", free_space [")
-                    .append(fsInfo.getFree())
+                    .append(fsPath.getFree())
                     .append("], usable_space [")
-                    .append(fsInfo.getAvailable())
+                    .append(fsPath.getAvailable())
                     .append("], total_space [")
-                    .append(fsInfo.getTotal())
+                    .append(fsPath.getTotal())
                     .append("], spins? [")
                     .append(spinsDesc)
                     .append("], mount [")
-                    .append(fsInfo.getMount())
+                    .append(fsPath.getMount())
                     .append("], type [")
-                    .append(fsInfo.getType())
+                    .append(fsPath.getType())
                     .append(']');
             }
             logger.debug(sb.toString());
         } else if (logger.isInfoEnabled()) {
-            FsStats.Info totFSInfo = new FsStats.Info();
+            FsInfo.Path totFSPath = new FsInfo.Path();
             Set<String> allTypes = new HashSet<>();
             Set<String> allSpins = new HashSet<>();
             Set<String> allMounts = new HashSet<>();
             for (NodePath nodePath : nodePaths) {
-                // TODO: can/should I use the chosen FsProbe instead (i.e. sigar if it's available)?
-                FsStats.Info fsInfo = JmxFsProbe.getFSInfo(nodePath);
-                String mount = fsInfo.getMount();
+                FsInfo.Path fsPath = FsProbe.getFSInfo(nodePath);
+                String mount = fsPath.getMount();
                 if (allMounts.contains(mount) == false) {
                     allMounts.add(mount);
-                    String type = fsInfo.getType();
+                    String type = fsPath.getType();
                     if (type != null) {
                         allTypes.add(type);
                     }
-                    Boolean spins = fsInfo.getSpins();
+                    Boolean spins = fsPath.getSpins();
                     if (spins == null) {
                         allSpins.add("unknown");
                     } else if (spins.booleanValue()) {
@@ -264,7 +263,7 @@ public class NodeEnvironment extends AbstractComponent implements Closeable {
                     } else {
                         allSpins.add("no");
                     }
-                    totFSInfo.add(fsInfo);
+                    totFSPath.add(fsPath);
                 }
             }
 
@@ -273,8 +272,8 @@ public class NodeEnvironment extends AbstractComponent implements Closeable {
                                       "using [%d] data paths, mounts [%s], net usable_space [%s], net total_space [%s], spins? [%s], types [%s]",
                                       nodePaths.length,
                                       allMounts,
-                                      totFSInfo.getAvailable(),
-                                      totFSInfo.getTotal(),
+                                      totFSPath.getAvailable(),
+                                      totFSPath.getTotal(),
                                       toString(allSpins),
                                       toString(allTypes)));
         }
@@ -312,7 +311,7 @@ public class NodeEnvironment extends AbstractComponent implements Closeable {
      * shard paths. The "write.lock" file is assumed to be under the shard
      * path's "index" directory as used by Elasticsearch.
      *
-     * @throws ElasticsearchException if any of the locks could not be acquired
+     * @throws LockObtainFailedException if any of the locks could not be acquired
      */
     public static void acquireFSLockForPaths(@IndexSettings Settings indexSettings, Path... shardPaths) throws IOException {
         Lock[] locks = new Lock[shardPaths.length];
@@ -327,7 +326,7 @@ public class NodeEnvironment extends AbstractComponent implements Closeable {
                 try {
                     locks[i] = Lucene.acquireWriteLock(dirs[i]);
                 } catch (IOException ex) {
-                    throw new ElasticsearchException("unable to acquire " +
+                    throw new LockObtainFailedException("unable to acquire " +
                             IndexWriter.WRITE_LOCK_NAME + " for " + p);
                 }
             }
@@ -662,6 +661,56 @@ public class NodeEnvironment extends AbstractComponent implements Closeable {
         return indices;
     }
 
+    /**
+     * Tries to find all allocated shards for the given index
+     * on the current node. NOTE: This methods is prone to race-conditions on the filesystem layer since it might not
+     * see directories created concurrently or while it's traversing.
+     * @param index the index to filter shards
+     * @return a set of shard IDs
+     * @throws IOException if an IOException occurs
+     */
+    public Set<ShardId> findAllShardIds(final Index index) throws IOException {
+        assert index != null;
+        if (nodePaths == null || locks == null) {
+            throw new IllegalStateException("node is not configured to store local location");
+        }
+        assert assertEnvIsLocked();
+        final Set<ShardId> shardIds = Sets.newHashSet();
+        String indexName = index.name();
+        for (final NodePath nodePath : nodePaths) {
+            Path location = nodePath.indicesPath;
+            if (Files.isDirectory(location)) {
+                try (DirectoryStream<Path> indexStream = Files.newDirectoryStream(location)) {
+                    for (Path indexPath : indexStream) {
+                        if (indexName.equals(indexPath.getFileName().toString())) {
+                            shardIds.addAll(findAllShardsForIndex(indexPath));
+                        }
+                    }
+                }
+            }
+        }
+        return shardIds;
+    }
+
+    private static Set<ShardId> findAllShardsForIndex(Path indexPath) throws IOException {
+        Set<ShardId> shardIds = new HashSet<>();
+        if (Files.isDirectory(indexPath)) {
+            try (DirectoryStream<Path> stream = Files.newDirectoryStream(indexPath)) {
+                String currentIndex = indexPath.getFileName().toString();
+                for (Path shardPath : stream) {
+                    if (Files.isDirectory(shardPath)) {
+                        Integer shardId = Ints.tryParse(shardPath.getFileName().toString());
+                        if (shardId != null) {
+                            ShardId id = new ShardId(currentIndex, shardId);
+                            shardIds.add(id);
+                        }
+                    }
+                }
+            }
+        }
+        return shardIds;
+    }
+
     @Override
     public void close() {
         if (closed.compareAndSet(false, true) && locks != null) {
@@ -721,11 +770,6 @@ public class NodeEnvironment extends AbstractComponent implements Closeable {
         return settings;
     }
 
-    /** return true if custom paths are allowed for indices */
-    public boolean isCustomPathsEnabled() {
-        return customPathsEnabled;
-    }
-
     /**
      * @param indexSettings settings for an index
      * @return true if the index has a custom data path
@@ -741,17 +785,16 @@ public class NodeEnvironment extends AbstractComponent implements Closeable {
      *
      * @param indexSettings settings for the index
      */
-    @SuppressForbidden(reason = "Lee is working on it: https://github.com/elastic/elasticsearch/pull/11065")
     private Path resolveCustomLocation(@IndexSettings Settings indexSettings) {
         assert indexSettings != Settings.EMPTY;
         String customDataDir = indexSettings.get(IndexMetaData.SETTING_DATA_PATH);
         if (customDataDir != null) {
             // This assert is because this should be caught by MetaDataCreateIndexService
-            assert customPathsEnabled;
+            assert sharedDataPath != null;
             if (addNodeId) {
-                return PathUtils.get(customDataDir).resolve(Integer.toString(this.localNodeId));
+                return sharedDataPath.resolve(customDataDir).resolve(Integer.toString(this.localNodeId));
             } else {
-                return PathUtils.get(customDataDir);
+                return sharedDataPath.resolve(customDataDir);
             }
         } else {
             throw new IllegalArgumentException("no custom " + IndexMetaData.SETTING_DATA_PATH + " setting available");

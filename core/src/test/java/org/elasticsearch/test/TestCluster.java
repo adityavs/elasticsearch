@@ -25,7 +25,7 @@ import org.elasticsearch.client.Client;
 import org.elasticsearch.cluster.metadata.IndexMetaData;
 import org.elasticsearch.common.logging.ESLogger;
 import org.elasticsearch.common.logging.Loggers;
-import org.elasticsearch.indices.IndexMissingException;
+import org.elasticsearch.index.IndexNotFoundException;
 import org.elasticsearch.indices.IndexTemplateMissingException;
 import org.elasticsearch.repositories.RepositoryMissingException;
 
@@ -135,7 +135,7 @@ public abstract class TestCluster implements Iterable<Client>, Closeable {
         if (size() > 0) {
             try {
                 assertAcked(client().admin().indices().prepareDelete(indices));
-            } catch (IndexMissingException e) {
+            } catch (IndexNotFoundException e) {
                 // ignore
             } catch (IllegalArgumentException e) {
                 // Happens if `action.destructive_requires_name` is set to true
@@ -153,7 +153,7 @@ public abstract class TestCluster implements Iterable<Client>, Closeable {
             } catch (AssertionError ae) {
                 // Try to see what threads are doing when we hit the "Delete index failed - not acked":
                 logger.info("dump all threads on AssertionError");
-                ElasticsearchTestCase.printStackDump(logger);
+                ESTestCase.printStackDump(logger);
                 logger.info("done dump all threads on AssertionError");
                 throw ae;
             }
@@ -211,4 +211,6 @@ public abstract class TestCluster implements Iterable<Client>, Closeable {
      * Returns the cluster name
      */
     public abstract String getClusterName();
+
+
 }

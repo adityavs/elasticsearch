@@ -19,22 +19,23 @@
 
 package org.elasticsearch.cluster.metadata;
 
-import com.carrotsearch.hppc.ObjectArrayList;
 import com.carrotsearch.hppc.ObjectHashSet;
 import com.carrotsearch.hppc.cursors.ObjectCursor;
 import com.carrotsearch.hppc.cursors.ObjectObjectCursor;
 import com.google.common.base.Predicate;
 import com.google.common.collect.*;
-
 import org.apache.lucene.util.CollectionUtil;
-import org.elasticsearch.action.support.IndicesOptions;
-import org.elasticsearch.cluster.*;
+import org.elasticsearch.cluster.Diff;
+import org.elasticsearch.cluster.Diffable;
+import org.elasticsearch.cluster.DiffableUtils;
 import org.elasticsearch.cluster.DiffableUtils.KeyedReader;
+import org.elasticsearch.cluster.InternalClusterInfoService;
 import org.elasticsearch.cluster.block.ClusterBlock;
 import org.elasticsearch.cluster.block.ClusterBlockLevel;
 import org.elasticsearch.cluster.routing.allocation.decider.DiskThresholdDecider;
 import org.elasticsearch.cluster.service.InternalClusterService;
 import org.elasticsearch.common.Nullable;
+import org.elasticsearch.common.ParseFieldMatcher;
 import org.elasticsearch.common.Strings;
 import org.elasticsearch.common.collect.HppcMaps;
 import org.elasticsearch.common.collect.ImmutableOpenMap;
@@ -46,9 +47,7 @@ import org.elasticsearch.common.settings.Settings;
 import org.elasticsearch.common.settings.loader.SettingsLoader;
 import org.elasticsearch.common.xcontent.*;
 import org.elasticsearch.discovery.DiscoverySettings;
-import org.elasticsearch.index.Index;
-import org.elasticsearch.indices.IndexClosedException;
-import org.elasticsearch.indices.IndexMissingException;
+import org.elasticsearch.index.IndexNotFoundException;
 import org.elasticsearch.indices.recovery.RecoverySettings;
 import org.elasticsearch.indices.store.IndicesStore;
 import org.elasticsearch.indices.ttl.IndicesTTLService;
@@ -58,11 +57,9 @@ import org.elasticsearch.search.warmer.IndexWarmersMetaData;
 import java.io.IOException;
 import java.util.*;
 
-import static com.google.common.collect.Lists.newArrayList;
-import static com.google.common.collect.Maps.newHashMap;
 import static org.elasticsearch.common.settings.Settings.*;
 
-public class MetaData implements Iterable<IndexMetaData>, Diffable<MetaData> {
+public class MetaData implements Iterable<IndexMetaData>, Diffable<MetaData>, FromXContentBuilder<MetaData>, ToXContent {
 
     public static final MetaData PROTO = builder().build();
 
@@ -134,7 +131,7 @@ public class MetaData implements Iterable<IndexMetaData>, Diffable<MetaData> {
 
     public static final String CONTEXT_MODE_GATEWAY = XContentContext.GATEWAY.toString();
 
-    private final String uuid;
+    private final String clusterUUID;
     private final long version;
 
     private final Settings transientSettings;
@@ -147,17 +144,15 @@ public class MetaData implements Iterable<IndexMetaData>, Diffable<MetaData> {
     private final transient int totalNumberOfShards; // Transient ? not serializable anyway?
     private final int numberOfShards;
 
-
     private final String[] allIndices;
     private final String[] allOpenIndices;
     private final String[] allClosedIndices;
 
-    private final ImmutableOpenMap<String, ImmutableOpenMap<String, AliasMetaData>> aliases;
-    private final ImmutableOpenMap<String, String[]> aliasAndIndexToIndexMap;
+    private final SortedMap<String, AliasOrIndex> aliasAndIndexLookup;
 
     @SuppressWarnings("unchecked")
-    MetaData(String uuid, long version, Settings transientSettings, Settings persistentSettings, ImmutableOpenMap<String, IndexMetaData> indices, ImmutableOpenMap<String, IndexTemplateMetaData> templates, ImmutableOpenMap<String, Custom> customs) {
-        this.uuid = uuid;
+    MetaData(String clusterUUID, long version, Settings transientSettings, Settings persistentSettings, ImmutableOpenMap<String, IndexMetaData> indices, ImmutableOpenMap<String, IndexTemplateMetaData> templates, ImmutableOpenMap<String, Custom> customs, String[] allIndices, String[] allOpenIndices, String[] allClosedIndices, SortedMap<String, AliasOrIndex> aliasAndIndexLookup) {
+        this.clusterUUID = clusterUUID;
         this.version = version;
         this.transientSettings = transientSettings;
         this.persistentSettings = persistentSettings;
@@ -167,95 +162,25 @@ public class MetaData implements Iterable<IndexMetaData>, Diffable<MetaData> {
         this.templates = templates;
         int totalNumberOfShards = 0;
         int numberOfShards = 0;
-        int numAliases = 0;
         for (ObjectCursor<IndexMetaData> cursor : indices.values()) {
             totalNumberOfShards += cursor.value.totalNumberOfShards();
             numberOfShards += cursor.value.numberOfShards();
-            numAliases += cursor.value.aliases().size();
         }
         this.totalNumberOfShards = totalNumberOfShards;
         this.numberOfShards = numberOfShards;
 
-        // build all indices map
-        List<String> allIndicesLst = Lists.newArrayList();
-        for (ObjectCursor<IndexMetaData> cursor : indices.values()) {
-            allIndicesLst.add(cursor.value.index());
-        }
-        allIndices = allIndicesLst.toArray(new String[allIndicesLst.size()]);
-        int numIndices = allIndicesLst.size();
-
-        List<String> allOpenIndices = Lists.newArrayList();
-        List<String> allClosedIndices = Lists.newArrayList();
-        for (ObjectCursor<IndexMetaData> cursor : indices.values()) {
-            IndexMetaData indexMetaData = cursor.value;
-            if (indexMetaData.state() == IndexMetaData.State.OPEN) {
-                allOpenIndices.add(indexMetaData.index());
-            } else if (indexMetaData.state() == IndexMetaData.State.CLOSE) {
-                allClosedIndices.add(indexMetaData.index());
-            }
-        }
-        this.allOpenIndices = allOpenIndices.toArray(new String[allOpenIndices.size()]);
-        this.allClosedIndices = allClosedIndices.toArray(new String[allClosedIndices.size()]);
-
-        // build aliases map
-        ImmutableOpenMap.Builder<String, Object> tmpAliases = ImmutableOpenMap.builder(numAliases);
-        for (ObjectCursor<IndexMetaData> cursor : indices.values()) {
-            IndexMetaData indexMetaData = cursor.value;
-            String index = indexMetaData.index();
-            for (ObjectCursor<AliasMetaData> aliasCursor : indexMetaData.aliases().values()) {
-                AliasMetaData aliasMd = aliasCursor.value;
-                ImmutableOpenMap.Builder<String, AliasMetaData> indexAliasMap = (ImmutableOpenMap.Builder<String, AliasMetaData>) tmpAliases.get(aliasMd.alias());
-                if (indexAliasMap == null) {
-                    indexAliasMap = ImmutableOpenMap.builder(1); // typically, there is 1 alias pointing to an index
-                    tmpAliases.put(aliasMd.alias(), indexAliasMap);
-                }
-                indexAliasMap.put(index, aliasMd);
-            }
-        }
-
-        for (ObjectCursor<String> cursor : tmpAliases.keys()) {
-            String alias = cursor.value;
-            // if there is access to the raw values buffer of the map that the immutable maps wraps, then we don't need to use put, and just set array slots
-            ImmutableOpenMap<String, AliasMetaData> map = ((ImmutableOpenMap.Builder) tmpAliases.get(alias)).cast().build();
-            tmpAliases.put(alias, map);
-        }
-
-        this.aliases = tmpAliases.<String, ImmutableOpenMap<String, AliasMetaData>>cast().build();
-        ImmutableOpenMap.Builder<String, Object> aliasAndIndexToIndexMap = ImmutableOpenMap.builder(numAliases + numIndices);
-        for (ObjectCursor<IndexMetaData> cursor : indices.values()) {
-            IndexMetaData indexMetaData = cursor.value;
-            ObjectArrayList<String> indicesLst = (ObjectArrayList<String>) aliasAndIndexToIndexMap.get(indexMetaData.index());
-            if (indicesLst == null) {
-                indicesLst = new ObjectArrayList<>();
-                aliasAndIndexToIndexMap.put(indexMetaData.index(), indicesLst);
-            }
-            indicesLst.add(indexMetaData.index());
-
-            for (ObjectCursor<String> cursor1 : indexMetaData.aliases().keys()) {
-                String alias = cursor1.value;
-                indicesLst = (ObjectArrayList<String>) aliasAndIndexToIndexMap.get(alias);
-                if (indicesLst == null) {
-                    indicesLst = new ObjectArrayList<>();
-                    aliasAndIndexToIndexMap.put(alias, indicesLst);
-                }
-                indicesLst.add(indexMetaData.index());
-            }
-        }
-
-        for (ObjectObjectCursor<String, Object> cursor : aliasAndIndexToIndexMap) {
-            String[] indicesLst = ((ObjectArrayList<String>) cursor.value).toArray(String.class);
-            aliasAndIndexToIndexMap.put(cursor.key, indicesLst);
-        }
-
-        this.aliasAndIndexToIndexMap = aliasAndIndexToIndexMap.<String, String[]>cast().build();
+        this.allIndices = allIndices;
+        this.allOpenIndices = allOpenIndices;
+        this.allClosedIndices = allClosedIndices;
+        this.aliasAndIndexLookup = aliasAndIndexLookup;
     }
 
     public long version() {
         return this.version;
     }
 
-    public String uuid() {
-        return this.uuid;
+    public String clusterUUID() {
+        return this.clusterUUID;
     }
 
     /**
@@ -273,12 +198,32 @@ public class MetaData implements Iterable<IndexMetaData>, Diffable<MetaData> {
         return this.persistentSettings;
     }
 
-    public ImmutableOpenMap<String, ImmutableOpenMap<String, AliasMetaData>> aliases() {
-        return this.aliases;
+    public boolean hasAlias(String alias) {
+        AliasOrIndex aliasOrIndex = getAliasAndIndexLookup().get(alias);
+        if (aliasOrIndex != null) {
+            return aliasOrIndex.isAlias();
+        } else {
+            return false;
+        }
     }
 
-    public ImmutableOpenMap<String, ImmutableOpenMap<String, AliasMetaData>> getAliases() {
-        return aliases();
+    public boolean equalsAliases(MetaData other) {
+        for (ObjectCursor<IndexMetaData> cursor : other.indices().values()) {
+            IndexMetaData otherIndex = cursor.value;
+            IndexMetaData thisIndex= indices().get(otherIndex.getIndex());
+            if (thisIndex == null) {
+                return false;
+            }
+            if (otherIndex.getAliases().equals(thisIndex.getAliases()) == false) {
+                return false;
+            }
+        }
+
+        return true;
+    }
+
+    public SortedMap<String, AliasOrIndex> getAliasAndIndexLookup() {
+        return aliasAndIndexLookup;
     }
 
     /**
@@ -471,16 +416,27 @@ public class MetaData implements Iterable<IndexMetaData>, Diffable<MetaData> {
     /**
      * Returns indexing routing for the given index.
      */
+    // TODO: This can be moved to IndexNameExpressionResolver too, but this means that we will support wildcards and other expressions
+    // in the index,bulk,update and delete apis.
     public String resolveIndexRouting(@Nullable String routing, String aliasOrIndex) {
-        // Check if index is specified by an alias
-        ImmutableOpenMap<String, AliasMetaData> indexAliases = aliases.get(aliasOrIndex);
-        if (indexAliases == null || indexAliases.isEmpty()) {
+        if (aliasOrIndex == null) {
             return routing;
         }
-        if (indexAliases.size() > 1) {
-            throw new IllegalArgumentException("Alias [" + aliasOrIndex + "] has more than one index associated with it [" + Arrays.toString(indexAliases.keys().toArray(String.class)) + "], can't execute a single index op");
+
+        AliasOrIndex result = getAliasAndIndexLookup().get(aliasOrIndex);
+        if (result == null || result.isAlias() == false) {
+            return routing;
         }
-        AliasMetaData aliasMd = indexAliases.values().iterator().next().value;
+        AliasOrIndex.Alias alias = (AliasOrIndex.Alias) result;
+        if (result.getIndices().size() > 1) {
+            String[] indexNames = new String[result.getIndices().size()];
+            int i = 0;
+            for (IndexMetaData indexMetaData : result.getIndices()) {
+                indexNames[i++] = indexMetaData.getIndex();
+            }
+            throw new IllegalArgumentException("Alias [" + aliasOrIndex + "] has more than one index associated with it [" + Arrays.toString(indexNames) + "], can't execute a single index op");
+        }
+        AliasMetaData aliasMd = alias.getFirstAliasMetaData();
         if (aliasMd.indexRouting() != null) {
             if (routing != null) {
                 if (!routing.equals(aliasMd.indexRouting())) {
@@ -497,447 +453,12 @@ public class MetaData implements Iterable<IndexMetaData>, Diffable<MetaData> {
         return routing;
     }
 
-    public Map<String, Set<String>> resolveSearchRouting(@Nullable String routing, String aliasOrIndex) {
-        return resolveSearchRouting(routing, convertFromWildcards(new String[]{aliasOrIndex}, IndicesOptions.lenientExpandOpen()));
-    }
-
-    public Map<String, Set<String>> resolveSearchRouting(@Nullable String routing, String[] aliasesOrIndices) {
-        if (isAllIndices(aliasesOrIndices)) {
-            return resolveSearchRoutingAllIndices(routing);
-        }
-
-        aliasesOrIndices = convertFromWildcards(aliasesOrIndices, IndicesOptions.lenientExpandOpen());
-
-        if (aliasesOrIndices.length == 1) {
-            return resolveSearchRoutingSingleValue(routing, aliasesOrIndices[0]);
-        }
-
-        Map<String, Set<String>> routings = null;
-        Set<String> paramRouting = null;
-        // List of indices that don't require any routing
-        Set<String> norouting = new HashSet<>();
-        if (routing != null) {
-            paramRouting = Strings.splitStringByCommaToSet(routing);
-        }
-
-        for (String aliasOrIndex : aliasesOrIndices) {
-            ImmutableOpenMap<String, AliasMetaData> indexToRoutingMap = aliases.get(aliasOrIndex);
-            if (indexToRoutingMap != null && !indexToRoutingMap.isEmpty()) {
-                for (ObjectObjectCursor<String, AliasMetaData> indexRouting : indexToRoutingMap) {
-                    if (!norouting.contains(indexRouting.key)) {
-                        if (!indexRouting.value.searchRoutingValues().isEmpty()) {
-                            // Routing alias
-                            if (routings == null) {
-                                routings = newHashMap();
-                            }
-                            Set<String> r = routings.get(indexRouting.key);
-                            if (r == null) {
-                                r = new HashSet<>();
-                                routings.put(indexRouting.key, r);
-                            }
-                            r.addAll(indexRouting.value.searchRoutingValues());
-                            if (paramRouting != null) {
-                                r.retainAll(paramRouting);
-                            }
-                            if (r.isEmpty()) {
-                                routings.remove(indexRouting.key);
-                            }
-                        } else {
-                            // Non-routing alias
-                            if (!norouting.contains(indexRouting.key)) {
-                                norouting.add(indexRouting.key);
-                                if (paramRouting != null) {
-                                    Set<String> r = new HashSet<>(paramRouting);
-                                    if (routings == null) {
-                                        routings = newHashMap();
-                                    }
-                                    routings.put(indexRouting.key, r);
-                                } else {
-                                    if (routings != null) {
-                                        routings.remove(indexRouting.key);
-                                    }
-                                }
-                            }
-                        }
-                    }
-                }
-            } else {
-                // Index
-                if (!norouting.contains(aliasOrIndex)) {
-                    norouting.add(aliasOrIndex);
-                    if (paramRouting != null) {
-                        Set<String> r = new HashSet<>(paramRouting);
-                        if (routings == null) {
-                            routings = newHashMap();
-                        }
-                        routings.put(aliasOrIndex, r);
-                    } else {
-                        if (routings != null) {
-                            routings.remove(aliasOrIndex);
-                        }
-                    }
-                }
-            }
-
-        }
-        if (routings == null || routings.isEmpty()) {
-            return null;
-        }
-        return routings;
-    }
-
-    private Map<String, Set<String>> resolveSearchRoutingSingleValue(@Nullable String routing, String aliasOrIndex) {
-        Map<String, Set<String>> routings = null;
-        Set<String> paramRouting = null;
-        if (routing != null) {
-            paramRouting = Strings.splitStringByCommaToSet(routing);
-        }
-
-        ImmutableOpenMap<String, AliasMetaData> indexToRoutingMap = aliases.get(aliasOrIndex);
-        if (indexToRoutingMap != null && !indexToRoutingMap.isEmpty()) {
-            // It's an alias
-            for (ObjectObjectCursor<String, AliasMetaData> indexRouting : indexToRoutingMap) {
-                if (!indexRouting.value.searchRoutingValues().isEmpty()) {
-                    // Routing alias
-                    Set<String> r = new HashSet<>(indexRouting.value.searchRoutingValues());
-                    if (paramRouting != null) {
-                        r.retainAll(paramRouting);
-                    }
-                    if (!r.isEmpty()) {
-                        if (routings == null) {
-                            routings = newHashMap();
-                        }
-                        routings.put(indexRouting.key, r);
-                    }
-                } else {
-                    // Non-routing alias
-                    if (paramRouting != null) {
-                        Set<String> r = new HashSet<>(paramRouting);
-                        if (routings == null) {
-                            routings = newHashMap();
-                        }
-                        routings.put(indexRouting.key, r);
-                    }
-                }
-            }
-        } else {
-            // It's an index
-            if (paramRouting != null) {
-                routings = ImmutableMap.of(aliasOrIndex, paramRouting);
-            }
-        }
-        return routings;
-    }
-
-    /**
-     * Sets the same routing for all indices
-     */
-    private Map<String, Set<String>> resolveSearchRoutingAllIndices(String routing) {
-        if (routing != null) {
-            Set<String> r = Strings.splitStringByCommaToSet(routing);
-            Map<String, Set<String>> routings = newHashMap();
-            String[] concreteIndices = concreteAllIndices();
-            for (String index : concreteIndices) {
-                routings.put(index, r);
-            }
-            return routings;
-        }
-        return null;
-    }
-
-
-    /**
-     * Translates the provided indices or aliases, eventually containing wildcard expressions, into actual indices.
-     *
-     * @param indicesOptions   how the aliases or indices need to be resolved to concrete indices
-     * @param aliasesOrIndices the aliases or indices to be resolved to concrete indices
-     * @return the obtained concrete indices
-     * @throws IndexMissingException if one of the aliases or indices is missing and the provided indices options
-     * don't allow such a case, or if the final result of the indices resolution is no indices and the indices options
-     * don't allow such a case.
-     * @throws IllegalArgumentException if one of the aliases resolve to multiple indices and the provided
-     * indices options don't allow such a case.
-     */
-    public String[] concreteIndices(IndicesOptions indicesOptions, String... aliasesOrIndices) throws IndexMissingException, IllegalArgumentException {
-        if (indicesOptions.expandWildcardsOpen() || indicesOptions.expandWildcardsClosed()) {
-            if (isAllIndices(aliasesOrIndices)) {
-                String[] concreteIndices;
-                if (indicesOptions.expandWildcardsOpen() && indicesOptions.expandWildcardsClosed()) {
-                    concreteIndices = concreteAllIndices();
-                } else if (indicesOptions.expandWildcardsOpen()) {
-                    concreteIndices = concreteAllOpenIndices();
-                } else {
-                    concreteIndices = concreteAllClosedIndices();
-                }
-
-                if (!indicesOptions.allowNoIndices() && concreteIndices.length == 0) {
-                    throw new IndexMissingException(new Index("_all"));
-                }
-                return concreteIndices;
-            }
-
-            aliasesOrIndices = convertFromWildcards(aliasesOrIndices, indicesOptions);
-        }
-
-        if (aliasesOrIndices == null || aliasesOrIndices.length == 0) {
-            if (!indicesOptions.allowNoIndices()) {
-                throw new IllegalArgumentException("no indices were specified and wildcard expansion is disabled.");
-            } else {
-                return Strings.EMPTY_ARRAY;
-            }
-        }
-
-        boolean failClosed = indicesOptions.forbidClosedIndices() && !indicesOptions.ignoreUnavailable();
-
-        // optimize for single element index (common case)
-        if (aliasesOrIndices.length == 1) {
-            return concreteIndices(aliasesOrIndices[0], indicesOptions, !indicesOptions.allowNoIndices());
-        }
-
-        // check if its a possible aliased index, if not, just return the passed array
-        boolean possiblyAliased = false;
-        boolean closedIndices = false;
-        for (String index : aliasesOrIndices) {
-            IndexMetaData indexMetaData = indices.get(index);
-            if (indexMetaData == null) {
-                possiblyAliased = true;
-                break;
-            } else {
-                if (indicesOptions.forbidClosedIndices() && indexMetaData.getState() == IndexMetaData.State.CLOSE) {
-                    if (failClosed) {
-                        throw new IndexClosedException(new Index(index));
-                    } else {
-                        closedIndices = true;
-                    }
-                }
-            }
-        }
-        if (!possiblyAliased) {
-            if (closedIndices) {
-                Set<String> actualIndices = new HashSet<>(Arrays.asList(aliasesOrIndices));
-                actualIndices.retainAll(new HashSet<Object>(Arrays.asList(allOpenIndices)));
-                return actualIndices.toArray(new String[actualIndices.size()]);
-            } else {
-                return aliasesOrIndices;
-            }
-        }
-
-        Set<String> actualIndices = new HashSet<>();
-        for (String aliasOrIndex : aliasesOrIndices) {
-            String[] indices = concreteIndices(aliasOrIndex, indicesOptions, !indicesOptions.ignoreUnavailable());
-            Collections.addAll(actualIndices, indices);
-        }
-
-        if (!indicesOptions.allowNoIndices() && actualIndices.isEmpty()) {
-            throw new IndexMissingException(new Index(Arrays.toString(aliasesOrIndices)));
-        }
-        return actualIndices.toArray(new String[actualIndices.size()]);
-    }
-
-    /**
-     * Utility method that allows to resolve an index or alias to its corresponding single concrete index.
-     * Callers should make sure they provide proper {@link org.elasticsearch.action.support.IndicesOptions}
-     * that require a single index as a result. The indices resolution must in fact return a single index when
-     * using this method, an {@link IllegalArgumentException} gets thrown otherwise.
-     *
-     * @param indexOrAlias   the index or alias to be resolved to concrete index
-     * @param indicesOptions the indices options to be used for the index resolution
-     * @return the concrete index obtained as a result of the index resolution
-     * @throws IndexMissingException                 if the index or alias provided doesn't exist
-     * @throws IllegalArgumentException if the index resolution lead to more than one index
-     */
-    public String concreteSingleIndex(String indexOrAlias, IndicesOptions indicesOptions) throws IndexMissingException, IllegalArgumentException {
-        String[] indices = concreteIndices(indicesOptions, indexOrAlias);
-        if (indices.length != 1) {
-            throw new IllegalArgumentException("unable to return a single index as the index and options provided got resolved to multiple indices");
-        }
-        return indices[0];
-    }
-
-    private String[] concreteIndices(String aliasOrIndex, IndicesOptions options, boolean failNoIndices) throws IndexMissingException, IllegalArgumentException {
-        boolean failClosed = options.forbidClosedIndices() && !options.ignoreUnavailable();
-
-        // a quick check, if this is an actual index, if so, return it
-        IndexMetaData indexMetaData = indices.get(aliasOrIndex);
-        if (indexMetaData != null) {
-            if (indexMetaData.getState() == IndexMetaData.State.CLOSE) {
-                if (failClosed) {
-                    throw new IndexClosedException(new Index(aliasOrIndex));
-                } else {
-                    return options.forbidClosedIndices() ? Strings.EMPTY_ARRAY : new String[]{aliasOrIndex};
-                }
-            } else {
-                return new String[]{aliasOrIndex};
-            }
-        }
-        // not an actual index, fetch from an alias
-        String[] indices = aliasAndIndexToIndexMap.getOrDefault(aliasOrIndex, Strings.EMPTY_ARRAY);
-        if (indices.length == 0 && failNoIndices) {
-            throw new IndexMissingException(new Index(aliasOrIndex));
-        }
-        if (indices.length > 1 && !options.allowAliasesToMultipleIndices()) {
-            throw new IllegalArgumentException("Alias [" + aliasOrIndex + "] has more than one indices associated with it [" + Arrays.toString(indices) + "], can't execute a single index op");
-        }
-
-        // No need to check whether indices referred by aliases are closed, because there are no closed indices.
-        if (allClosedIndices.length == 0) {
-            return indices;
-        }
-
-        switch (indices.length) {
-            case 0:
-                return indices;
-            case 1:
-                indexMetaData = this.indices.get(indices[0]);
-                if (indexMetaData != null && indexMetaData.getState() == IndexMetaData.State.CLOSE) {
-                    if (failClosed) {
-                        throw new IndexClosedException(new Index(indexMetaData.getIndex()));
-                    } else {
-                        if (options.forbidClosedIndices()) {
-                            return Strings.EMPTY_ARRAY;
-                        }
-                    }
-                }
-                return indices;
-            default:
-                ObjectArrayList<String> concreteIndices = new ObjectArrayList<>();
-                for (String index : indices) {
-                    indexMetaData = this.indices.get(index);
-                    if (indexMetaData != null) {
-                        if (indexMetaData.getState() == IndexMetaData.State.CLOSE) {
-                            if (failClosed) {
-                                throw new IndexClosedException(new Index(indexMetaData.getIndex()));
-                            } else if (!options.forbidClosedIndices()) {
-                                concreteIndices.add(index);
-                            }
-                        } else if (indexMetaData.getState() == IndexMetaData.State.OPEN) {
-                            concreteIndices.add(index);
-                        } else {
-                            throw new IllegalStateException("index state [" + indexMetaData.getState() + "] not supported");
-                        }
-                    }
-                }
-                return concreteIndices.toArray(String.class);
-        }
-    }
-
-    /**
-     * Converts a list of indices or aliases wildcards, and special +/- signs, into their respective full matches. It
-     * won't convert only to indices, but also to aliases. For example, alias_* will expand to alias_1 and alias_2, not
-     * to the respective indices those aliases point to.
-     */
-    public String[] convertFromWildcards(String[] aliasesOrIndices, IndicesOptions indicesOptions) {
-        if (aliasesOrIndices == null) {
-            return null;
-        }
-        Set<String> result = null;
-        for (int i = 0; i < aliasesOrIndices.length; i++) {
-            String aliasOrIndex = aliasesOrIndices[i];
-            if (aliasAndIndexToIndexMap.containsKey(aliasOrIndex)) {
-                if (result != null) {
-                    result.add(aliasOrIndex);
-                }
-                continue;
-            }
-            boolean add = true;
-            if (aliasOrIndex.charAt(0) == '+') {
-                // if its the first, add empty result set
-                if (i == 0) {
-                    result = new HashSet<>();
-                }
-                add = true;
-                aliasOrIndex = aliasOrIndex.substring(1);
-            } else if (aliasOrIndex.charAt(0) == '-') {
-                // if its the first, fill it with all the indices...
-                if (i == 0) {
-                    String[] concreteIndices;
-                    if (indicesOptions.expandWildcardsOpen() && indicesOptions.expandWildcardsClosed()) {
-                        concreteIndices = concreteAllIndices();
-                    } else if (indicesOptions.expandWildcardsOpen()) {
-                        concreteIndices = concreteAllOpenIndices();
-                    } else if (indicesOptions.expandWildcardsClosed()) {
-                        concreteIndices = concreteAllClosedIndices();
-                    } else {
-                        assert false : "Shouldn't end up here";
-                        concreteIndices = Strings.EMPTY_ARRAY;
-                    }
-                    result = new HashSet<>(Arrays.asList(concreteIndices));
-                }
-                add = false;
-                aliasOrIndex = aliasOrIndex.substring(1);
-            }
-            if (!Regex.isSimpleMatchPattern(aliasOrIndex)) {
-                if (!indicesOptions.ignoreUnavailable() && !aliasAndIndexToIndexMap.containsKey(aliasOrIndex)) {
-                    throw new IndexMissingException(new Index(aliasOrIndex));
-                }
-                if (result != null) {
-                    if (add) {
-                        result.add(aliasOrIndex);
-                    } else {
-                        result.remove(aliasOrIndex);
-                    }
-                }
-                continue;
-            }
-            if (result == null) {
-                // add all the previous ones...
-                result = new HashSet<>();
-                result.addAll(Arrays.asList(aliasesOrIndices).subList(0, i));
-            }
-            String[] indices;
-            if (indicesOptions.expandWildcardsOpen() && indicesOptions.expandWildcardsClosed()) {
-                indices = concreteAllIndices();
-            } else if (indicesOptions.expandWildcardsOpen()) {
-                indices = concreteAllOpenIndices();
-            } else if (indicesOptions.expandWildcardsClosed()) {
-                indices = concreteAllClosedIndices();
-            } else {
-                assert false : "convertFromWildcards shouldn't get called if wildcards expansion is disabled";
-                indices = Strings.EMPTY_ARRAY;
-            }
-            boolean found = false;
-            // iterating over all concrete indices and see if there is a wildcard match
-            for (String index : indices) {
-                if (Regex.simpleMatch(aliasOrIndex, index)) {
-                    found = true;
-                    if (add) {
-                        result.add(index);
-                    } else {
-                        result.remove(index);
-                    }
-                }
-            }
-            // iterating over all aliases and see if there is a wildcard match
-            for (ObjectCursor<String> cursor : aliases.keys()) {
-                String alias = cursor.value;
-                if (Regex.simpleMatch(aliasOrIndex, alias)) {
-                    found = true;
-                    if (add) {
-                        result.add(alias);
-                    } else {
-                        result.remove(alias);
-                    }
-                }
-            }
-            if (!found && !indicesOptions.allowNoIndices()) {
-                throw new IndexMissingException(new Index(aliasOrIndex));
-            }
-        }
-        if (result == null) {
-            return aliasesOrIndices;
-        }
-        if (result.isEmpty() && !indicesOptions.allowNoIndices()) {
-            throw new IndexMissingException(new Index(Arrays.toString(aliasesOrIndices)));
-        }
-        return result.toArray(new String[result.size()]);
-    }
-
     public boolean hasIndex(String index) {
         return indices.containsKey(index);
     }
 
     public boolean hasConcreteIndex(String index) {
-        return aliasAndIndexToIndexMap.containsKey(index);
+        return getAliasAndIndexLookup().containsKey(index);
     }
 
     public IndexMetaData index(String index) {
@@ -988,129 +509,26 @@ public class MetaData implements Iterable<IndexMetaData>, Diffable<MetaData> {
         return numberOfShards();
     }
 
-
-    /**
-     * Iterates through the list of indices and selects the effective list of filtering aliases for the
-     * given index.
-     * <p/>
-     * <p>Only aliases with filters are returned. If the indices list contains a non-filtering reference to
-     * the index itself - null is returned. Returns <tt>null</tt> if no filtering is required.</p>
-     */
-    public String[] filteringAliases(String index, String... indicesOrAliases) {
-        // expand the aliases wildcard
-        indicesOrAliases = convertFromWildcards(indicesOrAliases, IndicesOptions.lenientExpandOpen());
-
-        if (isAllIndices(indicesOrAliases)) {
-            return null;
-        }
-        // optimize for the most common single index/alias scenario
-        if (indicesOrAliases.length == 1) {
-            String alias = indicesOrAliases[0];
-            IndexMetaData indexMetaData = this.indices.get(index);
-            if (indexMetaData == null) {
-                // Shouldn't happen
-                throw new IndexMissingException(new Index(index));
-            }
-            AliasMetaData aliasMetaData = indexMetaData.aliases().get(alias);
-            boolean filteringRequired = aliasMetaData != null && aliasMetaData.filteringRequired();
-            if (!filteringRequired) {
-                return null;
-            }
-            return new String[]{alias};
-        }
-        List<String> filteringAliases = null;
-        for (String alias : indicesOrAliases) {
-            if (alias.equals(index)) {
-                return null;
-            }
-
-            IndexMetaData indexMetaData = this.indices.get(index);
-            if (indexMetaData == null) {
-                // Shouldn't happen
-                throw new IndexMissingException(new Index(index));
-            }
-
-            AliasMetaData aliasMetaData = indexMetaData.aliases().get(alias);
-            // Check that this is an alias for the current index
-            // Otherwise - skip it
-            if (aliasMetaData != null) {
-                boolean filteringRequired = aliasMetaData.filteringRequired();
-                if (filteringRequired) {
-                    // If filtering required - add it to the list of filters
-                    if (filteringAliases == null) {
-                        filteringAliases = newArrayList();
-                    }
-                    filteringAliases.add(alias);
-                } else {
-                    // If not, we have a non filtering alias for this index - no filtering needed
-                    return null;
-                }
-            }
-        }
-        if (filteringAliases == null) {
-            return null;
-        }
-        return filteringAliases.toArray(new String[filteringAliases.size()]);
-    }
-
-    /**
-     * Identifies whether the array containing index names given as argument refers to all indices
-     * The empty or null array identifies all indices
-     *
-     * @param aliasesOrIndices the array containing index names
-     * @return true if the provided array maps to all indices, false otherwise
-     */
-    public static boolean isAllIndices(String[] aliasesOrIndices) {
-        return aliasesOrIndices == null || aliasesOrIndices.length == 0 || isExplicitAllPattern(aliasesOrIndices);
-    }
-
     /**
      * Identifies whether the array containing type names given as argument refers to all types
      * The empty or null array identifies all types
      *
-     * @param types the array containing index names
-     * @return true if the provided array maps to all indices, false otherwise
+     * @param types the array containing types
+     * @return true if the provided array maps to all types, false otherwise
      */
     public static boolean isAllTypes(String[] types) {
-        return types == null || types.length == 0 || isExplicitAllPattern(types);
+        return types == null || types.length == 0 || isExplicitAllType(types);
     }
 
     /**
-     * Identifies whether the array containing index names given as argument explicitly refers to all indices
-     * The empty or null array doesn't explicitly map to all indices
+     * Identifies whether the array containing type names given as argument explicitly refers to all types
+     * The empty or null array doesn't explicitly map to all types
      *
-     * @param aliasesOrIndices the array containing index names
-     * @return true if the provided array explicitly maps to all indices, false otherwise
+     * @param types the array containing index names
+     * @return true if the provided array explicitly maps to all types, false otherwise
      */
-    public static boolean isExplicitAllPattern(String[] aliasesOrIndices) {
-        return aliasesOrIndices != null && aliasesOrIndices.length == 1 && ALL.equals(aliasesOrIndices[0]);
-    }
-
-    /**
-     * Identifies whether the first argument (an array containing index names) is a pattern that matches all indices
-     *
-     * @param indicesOrAliases the array containing index names
-     * @param concreteIndices  array containing the concrete indices that the first argument refers to
-     * @return true if the first argument is a pattern that maps to all available indices, false otherwise
-     */
-    public boolean isPatternMatchingAllIndices(String[] indicesOrAliases, String[] concreteIndices) {
-        // if we end up matching on all indices, check, if its a wildcard parameter, or a "-something" structure
-        if (concreteIndices.length == concreteAllIndices().length && indicesOrAliases.length > 0) {
-
-            //we might have something like /-test1,+test1 that would identify all indices
-            //or something like /-test1 with test1 index missing and IndicesOptions.lenient()
-            if (indicesOrAliases[0].charAt(0) == '-') {
-                return true;
-            }
-
-            //otherwise we check if there's any simple regex
-            for (String indexOrAlias : indicesOrAliases) {
-                if (Regex.isSimpleMatchPattern(indexOrAlias)) {
-                    return true;
-                }
-            }
-        }
-        return false;
+    public static boolean isExplicitAllType(String[] types) {
+        return types != null && types.length == 1 && ALL.equals(types[0]);
     }
 
     /**
@@ -1169,11 +587,22 @@ public class MetaData implements Iterable<IndexMetaData>, Diffable<MetaData> {
         return new MetaDataDiff(in);
     }
 
+    @Override
+    public MetaData fromXContent(XContentParser parser, ParseFieldMatcher parseFieldMatcher) throws IOException {
+        return Builder.fromXContent(parser);
+    }
+
+    @Override
+    public XContentBuilder toXContent(XContentBuilder builder, Params params) throws IOException {
+        Builder.toXContent(this, builder, params);
+        return builder;
+    }
+
     private static class MetaDataDiff implements Diff<MetaData> {
 
         private long version;
 
-        private String uuid;
+        private String clusterUUID;
 
         private Settings transientSettings;
         private Settings persistentSettings;
@@ -1183,7 +612,7 @@ public class MetaData implements Iterable<IndexMetaData>, Diffable<MetaData> {
 
 
         public MetaDataDiff(MetaData before, MetaData after) {
-            uuid = after.uuid;
+            clusterUUID = after.clusterUUID;
             version = after.version;
             transientSettings = after.transientSettings;
             persistentSettings = after.persistentSettings;
@@ -1193,7 +622,7 @@ public class MetaData implements Iterable<IndexMetaData>, Diffable<MetaData> {
         }
 
         public MetaDataDiff(StreamInput in) throws IOException {
-            uuid = in.readString();
+            clusterUUID = in.readString();
             version = in.readLong();
             transientSettings = Settings.readSettingsFromStream(in);
             persistentSettings = Settings.readSettingsFromStream(in);
@@ -1214,7 +643,7 @@ public class MetaData implements Iterable<IndexMetaData>, Diffable<MetaData> {
 
         @Override
         public void writeTo(StreamOutput out) throws IOException {
-            out.writeString(uuid);
+            out.writeString(clusterUUID);
             out.writeLong(version);
             Settings.writeSettingsToStream(transientSettings, out);
             Settings.writeSettingsToStream(persistentSettings, out);
@@ -1226,7 +655,7 @@ public class MetaData implements Iterable<IndexMetaData>, Diffable<MetaData> {
         @Override
         public MetaData apply(MetaData part) {
             Builder builder = builder();
-            builder.uuid(uuid);
+            builder.clusterUUID(clusterUUID);
             builder.version(version);
             builder.transientSettings(transientSettings);
             builder.persistentSettings(persistentSettings);
@@ -1241,7 +670,7 @@ public class MetaData implements Iterable<IndexMetaData>, Diffable<MetaData> {
     public MetaData readFrom(StreamInput in) throws IOException {
         Builder builder = new Builder();
         builder.version = in.readLong();
-        builder.uuid = in.readString();
+        builder.clusterUUID = in.readString();
         builder.transientSettings(readSettingsFromStream(in));
         builder.persistentSettings(readSettingsFromStream(in));
         int size = in.readVInt();
@@ -1264,7 +693,7 @@ public class MetaData implements Iterable<IndexMetaData>, Diffable<MetaData> {
     @Override
     public void writeTo(StreamOutput out) throws IOException {
         out.writeLong(version);
-        out.writeString(uuid);
+        out.writeString(clusterUUID);
         writeSettingsToStream(transientSettings, out);
         writeSettingsToStream(persistentSettings, out);
         out.writeVInt(indices.size());
@@ -1351,13 +780,18 @@ public class MetaData implements Iterable<IndexMetaData>, Diffable<MetaData> {
         }
 
         if (newPersistentSettings != null) {
-            return new MetaData(metaData.uuid(),
-                                metaData.version(),
-                                metaData.transientSettings(),
-                                newPersistentSettings.build(),
-                                metaData.getIndices(),
-                                metaData.getTemplates(),
-                                metaData.getCustoms());
+            return new MetaData(
+                    metaData.clusterUUID(),
+                    metaData.version(),
+                    metaData.transientSettings(),
+                    newPersistentSettings.build(),
+                    metaData.getIndices(),
+                    metaData.getTemplates(),
+                    metaData.getCustoms(),
+                    metaData.concreteAllIndices(),
+                    metaData.concreteAllOpenIndices(),
+                    metaData.concreteAllClosedIndices(),
+                    metaData.getAliasAndIndexLookup());
         } else {
             // No changes:
             return metaData;
@@ -1366,7 +800,7 @@ public class MetaData implements Iterable<IndexMetaData>, Diffable<MetaData> {
 
     public static class Builder {
 
-        private String uuid;
+        private String clusterUUID;
         private long version;
 
         private Settings transientSettings = Settings.Builder.EMPTY_SETTINGS;
@@ -1377,14 +811,14 @@ public class MetaData implements Iterable<IndexMetaData>, Diffable<MetaData> {
         private final ImmutableOpenMap.Builder<String, Custom> customs;
 
         public Builder() {
-            uuid = "_na_";
+            clusterUUID = "_na_";
             indices = ImmutableOpenMap.builder();
             templates = ImmutableOpenMap.builder();
             customs = ImmutableOpenMap.builder();
         }
 
         public Builder(MetaData metaData) {
-            this.uuid = metaData.uuid;
+            this.clusterUUID = metaData.clusterUUID;
             this.transientSettings = metaData.transientSettings;
             this.persistentSettings = metaData.persistentSettings;
             this.version = metaData.version;
@@ -1477,7 +911,7 @@ public class MetaData implements Iterable<IndexMetaData>, Diffable<MetaData> {
             for (String index : indices) {
                 IndexMetaData indexMetaData = this.indices.get(index);
                 if (indexMetaData == null) {
-                    throw new IndexMissingException(new Index(index));
+                    throw new IndexNotFoundException(index);
                 }
                 put(IndexMetaData.builder(indexMetaData)
                         .settings(settingsBuilder().put(indexMetaData.settings()).put(settings)));
@@ -1492,7 +926,7 @@ public class MetaData implements Iterable<IndexMetaData>, Diffable<MetaData> {
             for (String index : indices) {
                 IndexMetaData indexMetaData = this.indices.get(index);
                 if (indexMetaData == null) {
-                    throw new IndexMissingException(new Index(index));
+                    throw new IndexNotFoundException(index);
                 }
                 put(IndexMetaData.builder(indexMetaData).numberOfReplicas(numberOfReplicas));
             }
@@ -1522,20 +956,66 @@ public class MetaData implements Iterable<IndexMetaData>, Diffable<MetaData> {
             return this;
         }
 
-        public Builder uuid(String uuid) {
-            this.uuid = uuid;
+        public Builder clusterUUID(String clusterUUID) {
+            this.clusterUUID = clusterUUID;
             return this;
         }
 
-        public Builder generateUuidIfNeeded() {
-            if (uuid.equals("_na_")) {
-                uuid = Strings.randomBase64UUID();
+        public Builder generateClusterUuidIfNeeded() {
+            if (clusterUUID.equals("_na_")) {
+                clusterUUID = Strings.randomBase64UUID();
             }
             return this;
         }
 
         public MetaData build() {
-            return new MetaData(uuid, version, transientSettings, persistentSettings, indices.build(), templates.build(), customs.build());
+            // TODO: We should move these datastructures to IndexNameExpressionResolver, this will give the following benefits:
+            // 1) The datastructures will only be rebuilded when needed. Now during serailizing we rebuild these datastructures
+            //    while these datastructures aren't even used.
+            // 2) The aliasAndIndexLookup can be updated instead of rebuilding it all the time.
+
+            // build all concrete indices arrays:
+            // TODO: I think we can remove these arrays. it isn't worth the effort, for operations on all indices.
+            // When doing an operation across all indices, most of the time is spent on actually going to all shards and
+            // do the required operations, the bottleneck isn't resolving expressions into concrete indices.
+            List<String> allIndicesLst = Lists.newArrayList();
+            for (ObjectCursor<IndexMetaData> cursor : indices.values()) {
+                allIndicesLst.add(cursor.value.index());
+            }
+            String[] allIndices = allIndicesLst.toArray(new String[allIndicesLst.size()]);
+
+            List<String> allOpenIndicesLst = Lists.newArrayList();
+            List<String> allClosedIndicesLst = Lists.newArrayList();
+            for (ObjectCursor<IndexMetaData> cursor : indices.values()) {
+                IndexMetaData indexMetaData = cursor.value;
+                if (indexMetaData.state() == IndexMetaData.State.OPEN) {
+                    allOpenIndicesLst.add(indexMetaData.index());
+                } else if (indexMetaData.state() == IndexMetaData.State.CLOSE) {
+                    allClosedIndicesLst.add(indexMetaData.index());
+                }
+            }
+            String[] allOpenIndices = allOpenIndicesLst.toArray(new String[allOpenIndicesLst.size()]);
+            String[] allClosedIndices = allClosedIndicesLst.toArray(new String[allClosedIndicesLst.size()]);
+
+            // build all indices map
+            SortedMap<String, AliasOrIndex> aliasAndIndexLookup = new TreeMap<>();
+            for (ObjectCursor<IndexMetaData> cursor : indices.values()) {
+                IndexMetaData indexMetaData = cursor.value;
+                aliasAndIndexLookup.put(indexMetaData.getIndex(), new AliasOrIndex.Index(indexMetaData));
+
+                for (ObjectObjectCursor<String, AliasMetaData> aliasCursor : indexMetaData.getAliases()) {
+                    AliasMetaData aliasMetaData = aliasCursor.value;
+                    AliasOrIndex.Alias aliasOrIndex = (AliasOrIndex.Alias) aliasAndIndexLookup.get(aliasMetaData.getAlias());
+                    if (aliasOrIndex == null) {
+                        aliasOrIndex = new AliasOrIndex.Alias(aliasMetaData, indexMetaData);
+                        aliasAndIndexLookup.put(aliasMetaData.getAlias(), aliasOrIndex);
+                    } else {
+                        aliasOrIndex.addIndex(indexMetaData);
+                    }
+                }
+            }
+            aliasAndIndexLookup = Collections.unmodifiableSortedMap(aliasAndIndexLookup);
+            return new MetaData(clusterUUID, version, transientSettings, persistentSettings, indices.build(), templates.build(), customs.build(), allIndices, allOpenIndices, allClosedIndices, aliasAndIndexLookup);
         }
 
         public static String toXContent(MetaData metaData) throws IOException {
@@ -1552,7 +1032,7 @@ public class MetaData implements Iterable<IndexMetaData>, Diffable<MetaData> {
             builder.startObject("meta-data");
 
             builder.field("version", metaData.version());
-            builder.field("uuid", metaData.uuid);
+            builder.field("cluster_uuid", metaData.clusterUUID);
 
             if (!metaData.persistentSettings().getAsMap().isEmpty()) {
                 builder.startObject("settings");
@@ -1644,8 +1124,8 @@ public class MetaData implements Iterable<IndexMetaData>, Diffable<MetaData> {
                 } else if (token.isValue()) {
                     if ("version".equals(currentFieldName)) {
                         builder.version = parser.longValue();
-                    } else if ("uuid".equals(currentFieldName)) {
-                        builder.uuid = parser.text();
+                    } else if ("cluster_uuid".equals(currentFieldName) || "uuid".equals(currentFieldName)) {
+                        builder.clusterUUID = parser.text();
                     }
                 }
             }

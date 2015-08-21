@@ -210,7 +210,7 @@ _section_ markers like `{{#line_no}}`.  For this reason, the template should
 either be stored in a file (see <<pre-registered-templates>>) or, when used 
 via the REST API, should be written as a string:
 
-[source,json]
+[source,js]
 --------------------
 "inline": "{\"query\":{\"filtered\":{\"query\":{\"match\":{\"line\":\"{{text}}\"}},\"filter\":{{{#line_no}}\"range\":{\"line_no\":{{{#start}}\"gte\":\"{{start}}\"{{#end}},{{/end}}{{/start}}{{#end}}\"lte\":\"{{end}}\"{{/end}}}}{{/line_no}}}}}}"
 --------------------
@@ -298,3 +298,74 @@ GET /_search/template
 }
 ------------------------------------------
 <1> Name of the the query template stored in the `.scripts` index.
+
+[float]
+==== Validating templates
+
+A template can be rendered in a response with given parameters using
+
+[source,js]
+------------------------------------------
+GET /_render/template
+{
+  "inline": {
+    "query": {
+      "terms": {
+        "status": [
+          "{{#status}}",
+          "{{.}}",
+          "{{/status}}"
+        ]
+      }
+    }
+  },
+  "params": {
+    "status": [ "pending", "published" ]
+  }
+}
+------------------------------------------
+
+This call will return the rendered template:
+
+[source,js]
+------------------------------------------
+{
+  "template_output": {
+    "query": {
+      "terms": {
+        "status": [ <1>
+          "pending",
+          "published"
+        ]
+      }
+    }
+  }
+}
+------------------------------------------
+<1> `status` array has been populated with values from the `params` object.
+
+File and indexed templates can also be rendered by replacing `inline` with 
+`file` or `id` respectively. For example, to render a file template
+
+[source,js]
+------------------------------------------
+GET /_render/template
+{
+  "file": "my_template",
+  "params": {
+    "status": [ "pending", "published" ]
+  }
+}
+------------------------------------------
+
+Pre-registered templates can also be rendered using
+
+[source,js]
+------------------------------------------
+GET /_render/template/<template_name>
+{
+  "params": {
+    "...
+  }
+}
+------------------------------------------

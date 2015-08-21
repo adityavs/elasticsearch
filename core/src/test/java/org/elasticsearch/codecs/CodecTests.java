@@ -20,7 +20,6 @@
 package org.elasticsearch.codecs;
 
 import org.apache.lucene.codecs.Codec;
-import org.apache.lucene.util.LuceneTestCase.Slow;
 import org.elasticsearch.Version;
 import org.elasticsearch.cluster.metadata.IndexMetaData;
 import org.elasticsearch.common.settings.Settings;
@@ -28,7 +27,7 @@ import org.elasticsearch.common.xcontent.XContentFactory;
 import org.elasticsearch.index.IndexService;
 import org.elasticsearch.index.mapper.DocumentMapperParser;
 import org.elasticsearch.index.mapper.MapperParsingException;
-import org.elasticsearch.test.ElasticsearchSingleNodeTest;
+import org.elasticsearch.test.ESSingleNodeTestCase;
 import org.elasticsearch.test.VersionUtils;
 import org.junit.Assert;
 
@@ -36,10 +35,7 @@ import java.io.IOException;
 
 import static org.hamcrest.Matchers.containsString;
 
-/**
- */
-@Slow
-public class CodecTests extends ElasticsearchSingleNodeTest {
+public class CodecTests extends ESSingleNodeTestCase {
 
     public void testAcceptPostingsFormat() throws IOException {
         String mapping = XContentFactory.jsonBuilder().startObject().startObject("type")
@@ -51,11 +47,11 @@ public class CodecTests extends ElasticsearchSingleNodeTest {
             DocumentMapperParser parser = indexService.mapperService().documentMapperParser();
             try {
                 parser.parse(mapping);
-                if (v.onOrAfter(Version.V_2_0_0)) {
+                if (v.onOrAfter(Version.V_2_0_0_beta1)) {
                     fail("Elasticsearch 2.0 should not support custom postings formats");
                 }
             } catch (MapperParsingException e) {
-                if (v.before(Version.V_2_0_0)) {
+                if (v.before(Version.V_2_0_0_beta1)) {
                     // Elasticsearch 1.x should ignore custom postings formats
                     throw e;
                 }
@@ -74,11 +70,11 @@ public class CodecTests extends ElasticsearchSingleNodeTest {
             DocumentMapperParser parser = indexService.mapperService().documentMapperParser();
             try {
                 parser.parse(mapping);
-                if (v.onOrAfter(Version.V_2_0_0)) {
+                if (v.onOrAfter(Version.V_2_0_0_beta1)) {
                     fail("Elasticsearch 2.0 should not support custom postings formats");
                 }
             } catch (MapperParsingException e) {
-                if (v.before(Version.V_2_0_0)) {
+                if (v.before(Version.V_2_0_0_beta1)) {
                     // Elasticsearch 1.x should ignore custom postings formats
                     throw e;
                 }

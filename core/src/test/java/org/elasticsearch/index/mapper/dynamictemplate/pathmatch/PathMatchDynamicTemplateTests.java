@@ -24,21 +24,19 @@ import org.elasticsearch.common.bytes.BytesArray;
 import org.elasticsearch.index.IndexService;
 import org.elasticsearch.index.mapper.DocumentMapper;
 import org.elasticsearch.index.mapper.FieldMapper;
-import org.elasticsearch.index.mapper.FieldMappers;
-import org.elasticsearch.index.mapper.MapperUtils;
 import org.elasticsearch.index.mapper.ParsedDocument;
 import org.elasticsearch.index.mapper.ParseContext.Document;
-import org.elasticsearch.test.ElasticsearchSingleNodeTest;
+import org.elasticsearch.test.ESSingleNodeTestCase;
 import org.junit.Test;
 
-import static org.elasticsearch.common.io.Streams.copyToBytesFromClasspath;
-import static org.elasticsearch.common.io.Streams.copyToStringFromClasspath;
+import static org.elasticsearch.test.StreamsUtils.copyToBytesFromClasspath;
+import static org.elasticsearch.test.StreamsUtils.copyToStringFromClasspath;
 import static org.hamcrest.Matchers.equalTo;
 
 /**
  *
  */
-public class PathMatchDynamicTemplateTests extends ElasticsearchSingleNodeTest {
+public class PathMatchDynamicTemplateTests extends ESSingleNodeTestCase {
 
     @Test
     public void testSimple() throws Exception {
@@ -47,7 +45,7 @@ public class PathMatchDynamicTemplateTests extends ElasticsearchSingleNodeTest {
         client().admin().indices().preparePutMapping("test").setType("person").setSource(mapping).get();
         DocumentMapper docMapper = index.mapperService().documentMapper("person");
         byte[] json = copyToBytesFromClasspath("/org/elasticsearch/index/mapper/dynamictemplate/pathmatch/test-data.json");
-        ParsedDocument parsedDoc = docMapper.parse("person", "1", new BytesArray(json));
+        ParsedDocument parsedDoc = docMapper.parse("test", "person", "1", new BytesArray(json));
         client().admin().indices().preparePutMapping("test").setType("person").setSource(parsedDoc.dynamicMappingsUpdate().toString()).get();
         Document doc = parsedDoc.rootDoc();
 

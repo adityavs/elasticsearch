@@ -22,12 +22,12 @@ package org.elasticsearch.index.mapper.boost;
 import org.elasticsearch.common.xcontent.XContentFactory;
 import org.elasticsearch.index.mapper.DocumentMapper;
 import org.elasticsearch.index.mapper.ParsedDocument;
-import org.elasticsearch.test.ElasticsearchSingleNodeTest;
+import org.elasticsearch.test.ESSingleNodeTestCase;
 import org.junit.Test;
 
 import static org.hamcrest.Matchers.equalTo;
 
-public class CustomBoostMappingTests extends ElasticsearchSingleNodeTest {
+public class CustomBoostMappingTests extends ESSingleNodeTestCase {
 
     @Test
     public void testCustomBoostValues() throws Exception {
@@ -44,7 +44,7 @@ public class CustomBoostMappingTests extends ElasticsearchSingleNodeTest {
 
         DocumentMapper mapper = createIndex("test").mapperService().documentMapperParser().parse(mapping);
 
-        ParsedDocument doc = mapper.parse("type", "1", XContentFactory.jsonBuilder().startObject()
+        ParsedDocument doc = mapper.parse("test", "type", "1", XContentFactory.jsonBuilder().startObject()
                 .startObject("s_field").field("value", "s_value").field("boost", 2.0f).endObject()
                 .startObject("l_field").field("value", 1l).field("boost", 3.0f).endObject()
                 .startObject("i_field").field("value", 1).field("boost", 4.0f).endObject()

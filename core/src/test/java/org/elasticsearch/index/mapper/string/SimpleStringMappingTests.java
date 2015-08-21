@@ -26,10 +26,6 @@ import org.apache.lucene.index.DocValuesType;
 import org.apache.lucene.index.IndexOptions;
 import org.apache.lucene.index.IndexableField;
 import org.apache.lucene.index.IndexableFieldType;
-import org.apache.lucene.index.Term;
-import org.apache.lucene.queries.TermsQuery;
-import org.apache.lucene.search.TermQuery;
-import org.elasticsearch.common.lucene.search.Queries;
 import org.elasticsearch.common.settings.Settings;
 import org.elasticsearch.common.xcontent.ToXContent;
 import org.elasticsearch.common.xcontent.XContentBuilder;
@@ -47,12 +43,11 @@ import org.elasticsearch.index.mapper.MergeResult;
 import org.elasticsearch.index.mapper.ParseContext.Document;
 import org.elasticsearch.index.mapper.ParsedDocument;
 import org.elasticsearch.index.mapper.core.StringFieldMapper;
-import org.elasticsearch.test.ElasticsearchSingleNodeTest;
+import org.elasticsearch.test.ESSingleNodeTestCase;
 import org.junit.Before;
 import org.junit.Test;
 
 import java.util.Arrays;
-import java.util.Collections;
 import java.util.Map;
 
 import static org.elasticsearch.index.mapper.core.StringFieldMapper.Builder;
@@ -62,7 +57,7 @@ import static org.hamcrest.Matchers.nullValue;
 
 /**
  */
-public class SimpleStringMappingTests extends ElasticsearchSingleNodeTest {
+public class SimpleStringMappingTests extends ESSingleNodeTestCase {
 
     private static Settings DOC_VALUES_SETTINGS = Settings.builder().put(FieldDataType.FORMAT_KEY, FieldDataType.DOC_VALUES_FORMAT_VALUE).build();
 
@@ -83,7 +78,7 @@ public class SimpleStringMappingTests extends ElasticsearchSingleNodeTest {
 
         DocumentMapper defaultMapper = parser.parse(mapping);
 
-        ParsedDocument doc = defaultMapper.parse("type", "1", XContentFactory.jsonBuilder()
+        ParsedDocument doc = defaultMapper.parse("test", "type", "1", XContentFactory.jsonBuilder()
                 .startObject()
                 .field("field", "1234")
                 .endObject()
@@ -91,7 +86,7 @@ public class SimpleStringMappingTests extends ElasticsearchSingleNodeTest {
 
         assertThat(doc.rootDoc().getField("field"), notNullValue());
 
-        doc = defaultMapper.parse("type", "1", XContentFactory.jsonBuilder()
+        doc = defaultMapper.parse("test", "type", "1", XContentFactory.jsonBuilder()
                 .startObject()
                 .field("field", "12345")
                 .endObject()
@@ -99,7 +94,7 @@ public class SimpleStringMappingTests extends ElasticsearchSingleNodeTest {
 
         assertThat(doc.rootDoc().getField("field"), notNullValue());
 
-        doc = defaultMapper.parse("type", "1", XContentFactory.jsonBuilder()
+        doc = defaultMapper.parse("test", "type", "1", XContentFactory.jsonBuilder()
                 .startObject()
                 .field("field", "123456")
                 .endObject()
@@ -128,7 +123,7 @@ public class SimpleStringMappingTests extends ElasticsearchSingleNodeTest {
     private void assertParseIdemPotent(IndexableFieldType expected, DocumentMapper mapper) throws Exception {
         String mapping = mapper.toXContent(XContentFactory.jsonBuilder().startObject(), new ToXContent.MapParams(ImmutableMap.<String, String>of())).endObject().string();
         mapper = parser.parse(mapping);
-        ParsedDocument doc = mapper.parse("type", "1", XContentFactory.jsonBuilder()
+        ParsedDocument doc = mapper.parse("test", "type", "1", XContentFactory.jsonBuilder()
                 .startObject()
                 .field("field", "2345")
                 .endObject()
@@ -144,7 +139,7 @@ public class SimpleStringMappingTests extends ElasticsearchSingleNodeTest {
 
         DocumentMapper defaultMapper = parser.parse(mapping);
 
-        ParsedDocument doc = defaultMapper.parse("type", "1", XContentFactory.jsonBuilder()
+        ParsedDocument doc = defaultMapper.parse("test", "type", "1", XContentFactory.jsonBuilder()
                 .startObject()
                 .field("field", "1234")
                 .endObject()
@@ -163,7 +158,7 @@ public class SimpleStringMappingTests extends ElasticsearchSingleNodeTest {
 
         DocumentMapper defaultMapper = parser.parse(mapping);
 
-        ParsedDocument doc = defaultMapper.parse("type", "1", XContentFactory.jsonBuilder()
+        ParsedDocument doc = defaultMapper.parse("test", "type", "1", XContentFactory.jsonBuilder()
                 .startObject()
                 .field("field", "1234")
                 .endObject()
@@ -186,7 +181,7 @@ public class SimpleStringMappingTests extends ElasticsearchSingleNodeTest {
 
         defaultMapper = parser.parse(mapping);
 
-        doc = defaultMapper.parse("type", "1", XContentFactory.jsonBuilder()
+        doc = defaultMapper.parse("test", "type", "1", XContentFactory.jsonBuilder()
                 .startObject()
                 .field("field", "1234")
                 .endObject()
@@ -209,7 +204,7 @@ public class SimpleStringMappingTests extends ElasticsearchSingleNodeTest {
 
         defaultMapper = parser.parse(mapping);
 
-        doc = defaultMapper.parse("type", "1", XContentFactory.jsonBuilder()
+        doc = defaultMapper.parse("test", "type", "1", XContentFactory.jsonBuilder()
                 .startObject()
                 .field("field", "1234")
                 .endObject()
@@ -329,7 +324,7 @@ public class SimpleStringMappingTests extends ElasticsearchSingleNodeTest {
 
         DocumentMapper defaultMapper = parser.parse(mapping);
 
-        ParsedDocument doc = defaultMapper.parse("type", "1", XContentFactory.jsonBuilder()
+        ParsedDocument doc = defaultMapper.parse("test", "type", "1", XContentFactory.jsonBuilder()
                 .startObject()
                 .field("field1", "1234")
                 .field("field2", "1234")
@@ -400,7 +395,7 @@ public class SimpleStringMappingTests extends ElasticsearchSingleNodeTest {
 
         DocumentMapper defaultMapper = parser.parse(mapping);
 
-        ParsedDocument parsedDoc = defaultMapper.parse("type", "1", XContentFactory.jsonBuilder()
+        ParsedDocument parsedDoc = defaultMapper.parse("test", "type", "1", XContentFactory.jsonBuilder()
             .startObject()
             .field("str1", "1234")
             .field("str2", "1234")
@@ -454,7 +449,7 @@ public class SimpleStringMappingTests extends ElasticsearchSingleNodeTest {
 
         DocumentMapper defaultMapper = parser.parse(mapping);
 
-        ParsedDocument parsedDoc = defaultMapper.parse("type", "1", XContentFactory.jsonBuilder()
+        ParsedDocument parsedDoc = defaultMapper.parse("test", "type", "1", XContentFactory.jsonBuilder()
                 .startObject()
                 .field("str1", "1234")
                 .field("str2", "1234")
@@ -490,7 +485,7 @@ public class SimpleStringMappingTests extends ElasticsearchSingleNodeTest {
 
         DocumentMapper defaultMapper = parser.parse(mapping);
 
-        ParsedDocument doc = defaultMapper.parse("type", "1", XContentFactory.jsonBuilder()
+        ParsedDocument doc = defaultMapper.parse("test", "type", "1", XContentFactory.jsonBuilder()
                 .startObject()
                 .field("field", "1234")
                 .endObject()
@@ -505,7 +500,7 @@ public class SimpleStringMappingTests extends ElasticsearchSingleNodeTest {
         MergeResult mergeResult = defaultMapper.merge(parser.parse(updatedMapping).mapping(), false, false);
         assertFalse(Arrays.toString(mergeResult.buildConflicts()), mergeResult.hasConflicts());
 
-        doc = defaultMapper.parse("type", "1", XContentFactory.jsonBuilder()
+        doc = defaultMapper.parse("test", "type", "1", XContentFactory.jsonBuilder()
                 .startObject()
                 .field("field", "1234")
                 .endObject()

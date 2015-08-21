@@ -1,7 +1,7 @@
 [[query-dsl-filtered-query]]
 === Filtered Query
 
-deprecated[2.0.0, Use the `bool` query instead with a `must` clause for the query and a `filter` clause for the filter]
+deprecated[2.0.0-beta1, Use the `bool` query instead with a `must` clause for the query and a `filter` clause for the filter]
 
 The `filtered` query is used to combine a query which will be used for
 scoring with another query which will only be used for filtering the result
@@ -18,7 +18,7 @@ documents that remain.
       "match": { "tweet": "full text search" }
     },
     "filter": {
-      "range": { "created": { "gte": "now - 1d / d" }}
+      "range": { "created": { "gte": "now-1d/d" }}
     }
   }
 }
@@ -37,7 +37,7 @@ curl -XGET localhost:9200/_search -d '
         "match": { "tweet": "full text search" }
       },
       "filter": {
-        "range": { "created": { "gte": "now - 1d / d" }}
+        "range": { "created": { "gte": "now-1d/d" }}
       }
     }
   }
@@ -61,7 +61,7 @@ curl -XGET localhost:9200/_search -d '
   "query": {
     "filtered": { <1>
       "filter": {
-        "range": { "created": { "gte": "now - 1d / d" }}
+        "range": { "created": { "gte": "now-1d/d" }}
       }
     }
   }
@@ -83,7 +83,7 @@ Multiple filters can be applied by wrapping them in a
     "query": { "match": { "tweet": "full text search" }},
     "filter": {
       "bool": {
-        "must": { "range": { "created": { "gte": "now - 1d / d" }}},
+        "must": { "range": { "created": { "gte": "now-1d/d" }}},
         "should": [
           { "term": { "featured": true }},
           { "term": { "starred":  true }}
@@ -94,61 +94,3 @@ Multiple filters can be applied by wrapping them in a
   }
 }
 --------------------------------------------------
-
-===== Filter strategy
-
-You can control how the filter and query are executed with the `strategy`
-parameter:
-
-[source,js]
---------------------------------------------------
-{
-    "filtered" : {
-        "query" :   { ... },
-        "filter" :  { ... },
-        "strategy": "leap_frog"
-    }
-}
---------------------------------------------------
-
-IMPORTANT: This is an _expert-level_ setting.  Most users can simply ignore it.
-
-The `strategy` parameter accepts the following options:
-
-[horizontal]
-`leap_frog_query_first`::
-
-        Look for the first document matching the query, and then alternatively
-        advance the query and the filter to find common matches.
-
-`leap_frog_filter_first`::
-
-    Look for the first document matching the filter, and then alternatively
-    advance the query and the filter to find common matches.
-
-`leap_frog`::
-
-    Same as `leap_frog_query_first`.
-
-`query_first`::
-
-    If the filter supports random access, then search for documents using the
-    query, and then consult the filter to check whether there is a match.
-    Otherwise fall back to `leap_frog_query_first`.
-
-`random_access_${threshold}`::
-
-    If the filter supports random access and if the number of documents in the
-    index divided by the cardinality of the filter is greater than ${threshold},
-    then apply the filter first.
-    Otherwise fall back to `leap_frog_query_first`. `${threshold}` must be
-    greater than or equal to `1`.
-
-`random_access_always`::
-
-    Apply the filter first if it supports random access. Otherwise fall back
-    to `leap_frog_query_first`.
-
-The default strategy is to use `query_first` on filters that are not
-advanceable such as geo filters and script filters, and `random_access_100` on
-other filters.

@@ -31,31 +31,32 @@ import org.apache.lucene.store.Directory;
 import org.elasticsearch.action.termvectors.TermVectorsRequest.Flag;
 import org.elasticsearch.common.bytes.BytesArray;
 import org.elasticsearch.common.bytes.BytesReference;
-import org.elasticsearch.common.io.Streams;
 import org.elasticsearch.common.io.stream.InputStreamStreamInput;
 import org.elasticsearch.common.io.stream.OutputStreamStreamOutput;
 import org.elasticsearch.common.xcontent.XContentFactory;
 import org.elasticsearch.common.xcontent.XContentParser;
 import org.elasticsearch.common.xcontent.XContentType;
+import org.elasticsearch.index.mapper.FieldMapper;
 import org.elasticsearch.index.mapper.MapperParsingException;
-import org.elasticsearch.index.mapper.core.AbstractFieldMapper;
 import org.elasticsearch.index.mapper.core.TypeParsers;
 import org.elasticsearch.index.mapper.internal.AllFieldMapper;
 import org.elasticsearch.rest.action.termvectors.RestTermVectorsAction;
-import org.elasticsearch.test.ElasticsearchTestCase;
+import org.elasticsearch.test.ESTestCase;
+import org.elasticsearch.test.StreamsUtils;
 import org.hamcrest.Matchers;
 import org.junit.Test;
 
 import java.io.ByteArrayInputStream;
 import java.io.ByteArrayOutputStream;
 import java.io.IOException;
+import java.util.Arrays;
 import java.util.EnumSet;
 import java.util.HashSet;
 import java.util.Set;
 
 import static org.hamcrest.Matchers.equalTo;
 
-public class TermVectorsUnitTests extends ElasticsearchTestCase {
+public class TermVectorsUnitTests extends ESTestCase {
 
     @Test
     public void streamResponse() throws Exception {
@@ -266,7 +267,7 @@ public class TermVectorsUnitTests extends ElasticsearchTestCase {
         ft.setStoreTermVectorPayloads(true);
         ft.setStoreTermVectors(true);
         ft.setStoreTermVectorPositions(true);
-        String ftOpts = AbstractFieldMapper.termVectorOptionsToString(ft);
+        String ftOpts = FieldMapper.termVectorOptionsToString(ft);
         assertThat("with_positions_payloads", equalTo(ftOpts));
         AllFieldMapper.Builder builder = new AllFieldMapper.Builder(null);
         boolean exceptiontrown = false;
@@ -285,25 +286,25 @@ public class TermVectorsUnitTests extends ElasticsearchTestCase {
         ft.setStoreTermVectorPayloads(true);
         ft.setStoreTermVectors(true);
         ft.setStoreTermVectorPositions(false);
-        String ftOpts = AbstractFieldMapper.termVectorOptionsToString(ft);
+        String ftOpts = FieldMapper.termVectorOptionsToString(ft);
         assertThat(ftOpts, equalTo("with_offsets"));
     }
 
     @Test
     public void testMultiParser() throws Exception {
-        byte[] data = Streams.copyToBytesFromClasspath("/org/elasticsearch/action/termvectors/multiRequest1.json");
+        byte[] data = StreamsUtils.copyToBytesFromClasspath("/org/elasticsearch/action/termvectors/multiRequest1.json");
         BytesReference bytes = new BytesArray(data);
         MultiTermVectorsRequest request = new MultiTermVectorsRequest();
         request.add(new TermVectorsRequest(), bytes);
         checkParsedParameters(request);
         
-        data = Streams.copyToBytesFromClasspath("/org/elasticsearch/action/termvectors/multiRequest2.json");
+        data = StreamsUtils.copyToBytesFromClasspath("/org/elasticsearch/action/termvectors/multiRequest2.json");
         bytes = new BytesArray(data);
         request = new MultiTermVectorsRequest();
         request.add(new TermVectorsRequest(), bytes);
         checkParsedParameters(request);
-        
     }
+
     void checkParsedParameters(MultiTermVectorsRequest request) {
         Set<String> ids = new HashSet<>();
         ids.add("1");
@@ -324,5 +325,31 @@ public class TermVectorsUnitTests extends ElasticsearchTestCase {
             assertThat(singleRequest.selectedFields(), equalTo(fields));
         }
     }
-    
+
+    @Test // issue #12311
+    public void testMultiParserFilter() throws Exception {
+        byte[] data = StreamsUtils.copyToBytesFromClasspath("/org/elasticsearch/action/termvectors/multiRequest3.json");
+        BytesReference bytes = new BytesArray(data);
+        MultiTermVectorsRequest request = new MultiTermVectorsRequest();
+        request.add(new TermVectorsRequest(), bytes);
+        checkParsedFilterParameters(request);
+    }
+
+    void checkParsedFilterParameters(MultiTermVectorsRequest multiRequest) {
+        Set<String> ids = new HashSet<>(Arrays.asList("1", "2"));
+        for (TermVectorsRequest request : multiRequest.requests) {
+            assertThat(request.index(), equalTo("testidx"));
+            assertThat(request.type(), equalTo("test"));
+            assertTrue(ids.remove(request.id()));
+            assertNotNull(request.filterSettings());
+            assertThat(request.filterSettings().maxNumTerms, equalTo(20));
+            assertThat(request.filterSettings().minTermFreq, equalTo(1));
+            assertThat(request.filterSettings().maxTermFreq, equalTo(20));
+            assertThat(request.filterSettings().minDocFreq, equalTo(1));
+            assertThat(request.filterSettings().maxDocFreq, equalTo(20));
+            assertThat(request.filterSettings().minWordLength, equalTo(1));
+            assertThat(request.filterSettings().maxWordLength, equalTo(20));
+        }
+        assertTrue(ids.isEmpty());
+    }
 }

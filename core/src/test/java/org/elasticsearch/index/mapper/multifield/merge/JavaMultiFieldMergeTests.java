@@ -21,26 +21,24 @@ package org.elasticsearch.index.mapper.multifield.merge;
 
 import org.apache.lucene.index.IndexOptions;
 import org.apache.lucene.index.IndexableField;
-import org.elasticsearch.common.bytes.BytesArray;
 import org.elasticsearch.common.bytes.BytesReference;
 import org.elasticsearch.common.xcontent.XContentFactory;
 import org.elasticsearch.index.mapper.DocumentMapper;
 import org.elasticsearch.index.mapper.DocumentMapperParser;
 import org.elasticsearch.index.mapper.MergeResult;
 import org.elasticsearch.index.mapper.ParseContext.Document;
-import org.elasticsearch.test.ElasticsearchSingleNodeTest;
+import org.elasticsearch.test.ESSingleNodeTestCase;
 import org.junit.Test;
 
 import java.util.Arrays;
 
-import static org.elasticsearch.common.io.Streams.copyToBytesFromClasspath;
-import static org.elasticsearch.common.io.Streams.copyToStringFromClasspath;
+import static org.elasticsearch.test.StreamsUtils.copyToStringFromClasspath;
 import static org.hamcrest.Matchers.*;
 
 /**
  *
  */
-public class JavaMultiFieldMergeTests extends ElasticsearchSingleNodeTest {
+public class JavaMultiFieldMergeTests extends ESSingleNodeTestCase {
 
     @Test
     public void testMergeMultiField() throws Exception {
@@ -53,7 +51,7 @@ public class JavaMultiFieldMergeTests extends ElasticsearchSingleNodeTest {
         assertThat(docMapper.mappers().getMapper("name.indexed"), nullValue());
 
         BytesReference json = XContentFactory.jsonBuilder().startObject().field("name", "some name").endObject().bytes();
-        Document doc = docMapper.parse("person", "1", json).rootDoc();
+        Document doc = docMapper.parse("test", "person", "1", json).rootDoc();
         IndexableField f = doc.getField("name");
         assertThat(f, notNullValue());
         f = doc.getField("name.indexed");
@@ -75,7 +73,7 @@ public class JavaMultiFieldMergeTests extends ElasticsearchSingleNodeTest {
         assertThat(docMapper.mappers().getMapper("name.not_indexed2"), nullValue());
         assertThat(docMapper.mappers().getMapper("name.not_indexed3"), nullValue());
 
-        doc = docMapper.parse("person", "1", json).rootDoc();
+        doc = docMapper.parse("test", "person", "1", json).rootDoc();
         f = doc.getField("name");
         assertThat(f, notNullValue());
         f = doc.getField("name.indexed");
@@ -125,7 +123,7 @@ public class JavaMultiFieldMergeTests extends ElasticsearchSingleNodeTest {
         assertThat(docMapper.mappers().getMapper("name.indexed"), nullValue());
 
         BytesReference json = XContentFactory.jsonBuilder().startObject().field("name", "some name").endObject().bytes();
-        Document doc = docMapper.parse("person", "1", json).rootDoc();
+        Document doc = docMapper.parse("test", "person", "1", json).rootDoc();
         IndexableField f = doc.getField("name");
         assertThat(f, notNullValue());
         f = doc.getField("name.indexed");
@@ -148,7 +146,7 @@ public class JavaMultiFieldMergeTests extends ElasticsearchSingleNodeTest {
         assertThat(docMapper.mappers().getMapper("name.not_indexed2"), nullValue());
         assertThat(docMapper.mappers().getMapper("name.not_indexed3"), nullValue());
 
-        doc = docMapper.parse("person", "1", json).rootDoc();
+        doc = docMapper.parse("test", "person", "1", json).rootDoc();
         f = doc.getField("name");
         assertThat(f, notNullValue());
         f = doc.getField("name.indexed");

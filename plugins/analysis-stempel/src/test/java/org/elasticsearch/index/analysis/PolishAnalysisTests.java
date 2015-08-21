@@ -34,9 +34,8 @@ import org.elasticsearch.index.IndexNameModule;
 import org.elasticsearch.index.analysis.pl.PolishAnalysisBinderProcessor;
 import org.elasticsearch.index.analysis.pl.PolishStemTokenFilterFactory;
 import org.elasticsearch.index.settings.IndexSettingsModule;
-import org.elasticsearch.indices.analysis.IndicesAnalysisModule;
 import org.elasticsearch.indices.analysis.IndicesAnalysisService;
-import org.elasticsearch.test.ElasticsearchTestCase;
+import org.elasticsearch.test.ESTestCase;
 import org.hamcrest.MatcherAssert;
 import org.junit.Test;
 
@@ -46,7 +45,7 @@ import static org.hamcrest.Matchers.instanceOf;
 
 /**
  */
-public class PolishAnalysisTests extends ElasticsearchTestCase {
+public class PolishAnalysisTests extends ESTestCase {
 
     @Test
     public void testDefaultsPolishAnalysis() {
@@ -56,7 +55,7 @@ public class PolishAnalysisTests extends ElasticsearchTestCase {
                 .put(IndexMetaData.SETTING_VERSION_CREATED, Version.CURRENT)
                 .build();
 
-        Injector parentInjector = new ModulesBuilder().add(new SettingsModule(EMPTY_SETTINGS), new EnvironmentModule(new Environment(settings)), new IndicesAnalysisModule()).createInjector();
+        Injector parentInjector = new ModulesBuilder().add(new SettingsModule(EMPTY_SETTINGS), new EnvironmentModule(new Environment(settings))).createInjector();
         Injector injector = new ModulesBuilder().add(
                 new IndexSettingsModule(index, settings),
                 new IndexNameModule(index),

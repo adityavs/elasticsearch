@@ -25,6 +25,7 @@ import org.apache.lucene.document.Field;
 import org.apache.lucene.index.IndexOptions;
 import org.apache.lucene.index.IndexableField;
 import org.apache.lucene.util.CloseableThreadLocal;
+import org.elasticsearch.Version;
 import org.elasticsearch.common.Strings;
 import org.elasticsearch.common.joda.FormatDateTimeFormatter;
 import org.elasticsearch.common.settings.Settings;
@@ -33,18 +34,16 @@ import org.elasticsearch.common.xcontent.XContentBuilder;
 import org.elasticsearch.common.xcontent.XContentFactory;
 import org.elasticsearch.common.xcontent.XContentHelper;
 import org.elasticsearch.common.xcontent.XContentParser;
-import org.elasticsearch.index.mapper.core.AbstractFieldMapper;
 import org.elasticsearch.index.mapper.core.NumberFieldMapper;
 import org.elasticsearch.index.mapper.core.StringFieldMapper;
-import org.elasticsearch.index.mapper.core.AbstractFieldMapper.Builder;
 import org.elasticsearch.index.mapper.core.DateFieldMapper.DateFieldType;
-import org.elasticsearch.index.mapper.core.LongFieldMapper.LongFieldType;
 import org.elasticsearch.index.mapper.core.StringFieldMapper.StringFieldType;
 import org.elasticsearch.index.mapper.internal.TypeFieldMapper;
 import org.elasticsearch.index.mapper.internal.UidFieldMapper;
 import org.elasticsearch.index.mapper.object.ArrayValueMapperParser;
 import org.elasticsearch.index.mapper.object.ObjectMapper;
 import org.elasticsearch.index.mapper.object.RootObjectMapper;
+import org.elasticsearch.percolator.PercolatorService;
 
 import java.io.Closeable;
 import java.io.IOException;
@@ -59,18 +58,16 @@ class DocumentParser implements Closeable {
     private CloseableThreadLocal<ParseContext.InternalParseContext> cache = new CloseableThreadLocal<ParseContext.InternalParseContext>() {
         @Override
         protected ParseContext.InternalParseContext initialValue() {
-            return new ParseContext.InternalParseContext(index, indexSettings, docMapperParser, docMapper, new ContentPath(0));
+            return new ParseContext.InternalParseContext(indexSettings, docMapperParser, docMapper, new ContentPath(0));
         }
     };
 
-    private final String index;
     private final Settings indexSettings;
     private final DocumentMapperParser docMapperParser;
     private final DocumentMapper docMapper;
     private final ReleasableLock parseLock;
 
-    public DocumentParser(String index, Settings indexSettings, DocumentMapperParser docMapperParser, DocumentMapper docMapper, ReleasableLock parseLock) {
-        this.index = index;
+    public DocumentParser(Settings indexSettings, DocumentMapperParser docMapperParser, DocumentMapper docMapper, ReleasableLock parseLock) {
         this.indexSettings = indexSettings;
         this.docMapperParser = docMapperParser;
         this.docMapper = docMapper;
@@ -117,8 +114,8 @@ class DocumentParser implements Closeable {
                 throw new MapperParsingException("Malformed content, after first object, either the type field or the actual properties should exist");
             }
 
-            for (RootMapper rootMapper : mapping.rootMappers) {
-                rootMapper.preParse(context);
+            for (MetadataFieldMapper metadataMapper : mapping.metadataMappers) {
+                metadataMapper.preParse(context);
             }
 
             if (!emptyDoc) {
@@ -132,8 +129,17 @@ class DocumentParser implements Closeable {
                 parser.nextToken();
             }
 
-            for (RootMapper rootMapper : mapping.rootMappers) {
-                rootMapper.postParse(context);
+            // try to parse the next token, this should be null if the object is ended properly
+            // but will throw a JSON exception if the extra tokens is not valid JSON (this will be handled by the catch)
+            if (Version.indexCreated(indexSettings).onOrAfter(Version.V_2_0_0_beta1)
+                && source.parser() == null && parser != null) {
+                // only check for end of tokens if we created the parser here
+                token = parser.nextToken();
+                assert token == null; // double check, in tests, that we didn't end parsing early
+            }
+
+            for (MetadataFieldMapper metadataMapper : mapping.metadataMappers) {
+                metadataMapper.postParse(context);
             }
         } catch (Throwable e) {
             // if its already a mapper parsing exception, no need to wrap it...
@@ -634,6 +640,7 @@ class DocumentParser implements Closeable {
                 // best-effort to not introduce a conflict
                 if (builder instanceof StringFieldMapper.Builder) {
                     StringFieldMapper.Builder stringBuilder = (StringFieldMapper.Builder) builder;
+                    stringBuilder.fieldDataSettings(existingFieldType.fieldDataType().getSettings());
                     stringBuilder.store(existingFieldType.stored());
                     stringBuilder.indexOptions(existingFieldType.indexOptions());
                     stringBuilder.tokenized(existingFieldType.tokenized());
@@ -643,6 +650,7 @@ class DocumentParser implements Closeable {
                     stringBuilder.searchAnalyzer(existingFieldType.searchAnalyzer());
                 } else if (builder instanceof NumberFieldMapper.Builder) {
                     NumberFieldMapper.Builder<?,?> numberBuilder = (NumberFieldMapper.Builder<?, ?>) builder;
+                    numberBuilder.fieldDataSettings(existingFieldType.fieldDataType().getSettings());
                     numberBuilder.store(existingFieldType.stored());
                     numberBuilder.indexOptions(existingFieldType.indexOptions());
                     numberBuilder.tokenized(existingFieldType.tokenized());

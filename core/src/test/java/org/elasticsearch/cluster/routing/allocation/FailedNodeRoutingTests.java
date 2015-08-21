@@ -30,7 +30,7 @@ import org.elasticsearch.cluster.routing.RoutingTable;
 import org.elasticsearch.cluster.routing.allocation.decider.ClusterRebalanceAllocationDecider;
 import org.elasticsearch.common.logging.ESLogger;
 import org.elasticsearch.common.logging.Loggers;
-import org.elasticsearch.test.ElasticsearchAllocationTestCase;
+import org.elasticsearch.test.ESAllocationTestCase;
 import org.junit.Test;
 
 import static org.elasticsearch.cluster.routing.ShardRoutingState.INITIALIZING;
@@ -38,7 +38,7 @@ import static org.elasticsearch.cluster.routing.ShardRoutingState.STARTED;
 import static org.elasticsearch.common.settings.Settings.settingsBuilder;
 import static org.hamcrest.Matchers.equalTo;
 
-public class FailedNodeRoutingTests extends ElasticsearchAllocationTestCase {
+public class FailedNodeRoutingTests extends ESAllocationTestCase {
 
     private final ESLogger logger = Loggers.getLogger(FailedNodeRoutingTests.class);
 
@@ -66,18 +66,18 @@ public class FailedNodeRoutingTests extends ElasticsearchAllocationTestCase {
         clusterState = ClusterState.builder(clusterState).routingTable(routingTable).build();
 
         logger.info("start all the primary shards, replicas will start initializing");
-        RoutingNodes routingNodes = clusterState.routingNodes();
+        RoutingNodes routingNodes = clusterState.getRoutingNodes();
         prevRoutingTable = routingTable;
         routingTable = strategy.applyStartedShards(clusterState, routingNodes.shardsWithState(INITIALIZING)).routingTable();
         clusterState = ClusterState.builder(clusterState).routingTable(routingTable).build();
-        routingNodes = clusterState.routingNodes();
+        routingNodes = clusterState.getRoutingNodes();
 
         logger.info("start the replica shards");
-        routingNodes = clusterState.routingNodes();
+        routingNodes = clusterState.getRoutingNodes();
         prevRoutingTable = routingTable;
         routingTable = strategy.applyStartedShards(clusterState, routingNodes.shardsWithState(INITIALIZING)).routingTable();
         clusterState = ClusterState.builder(clusterState).routingTable(routingTable).build();
-        routingNodes = clusterState.routingNodes();
+        routingNodes = clusterState.getRoutingNodes();
 
         assertThat(routingNodes.node("node1").numberOfShardsWithState(STARTED), equalTo(1));
         assertThat(routingNodes.node("node2").numberOfShardsWithState(STARTED), equalTo(1));
@@ -95,7 +95,7 @@ public class FailedNodeRoutingTests extends ElasticsearchAllocationTestCase {
         prevRoutingTable = routingTable;
         routingTable = strategy.reroute(clusterState).routingTable();
         clusterState = ClusterState.builder(clusterState).routingTable(routingTable).build();
-        routingNodes = clusterState.routingNodes();
+        routingNodes = clusterState.getRoutingNodes();
 
         for (RoutingNode routingNode : routingNodes) {
             assertThat(routingNode.numberOfShardsWithState(STARTED), equalTo(1));

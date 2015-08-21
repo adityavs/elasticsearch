@@ -20,16 +20,18 @@
 package org.elasticsearch.transport;
 
 import com.google.common.base.Charsets;
+
 import org.elasticsearch.Version;
+import org.elasticsearch.common.io.stream.NamedWriteableRegistry;
 import org.elasticsearch.common.network.NetworkService;
 import org.elasticsearch.common.settings.Settings;
 import org.elasticsearch.common.transport.InetSocketTransportAddress;
 import org.elasticsearch.common.util.BigArrays;
 import org.elasticsearch.indices.breaker.NoneCircuitBreakerService;
 import org.elasticsearch.node.settings.NodeSettingsService;
-import org.elasticsearch.test.ElasticsearchTestCase;
-import org.elasticsearch.test.cache.recycler.MockBigArrays;
-import org.elasticsearch.test.cache.recycler.MockPageCacheRecycler;
+import org.elasticsearch.test.ESTestCase;
+import org.elasticsearch.common.util.MockBigArrays;
+import org.elasticsearch.cache.recycler.MockPageCacheRecycler;
 import org.elasticsearch.threadpool.ThreadPool;
 import org.elasticsearch.transport.netty.NettyTransport;
 import org.junit.After;
@@ -38,6 +40,7 @@ import org.junit.Test;
 
 import java.io.BufferedReader;
 import java.io.InputStreamReader;
+import java.net.InetAddress;
 import java.net.Socket;
 
 import static org.elasticsearch.common.settings.Settings.settingsBuilder;
@@ -47,14 +50,14 @@ import static org.hamcrest.Matchers.is;
  * This test checks, if a HTTP look-alike request (starting with a HTTP method and a space)
  * actually returns text response instead of just dropping the connection
  */
-public class NettySizeHeaderFrameDecoderTests extends ElasticsearchTestCase {
+public class NettySizeHeaderFrameDecoderTests extends ESTestCase {
 
     private final Settings settings = settingsBuilder().put("name", "foo").put("transport.host", "127.0.0.1").build();
 
     private ThreadPool threadPool;
     private NettyTransport nettyTransport;
     private int port;
-    private String host;
+    private InetAddress host;
 
     @Before
     public void startThreadPool() {
@@ -62,14 +65,14 @@ public class NettySizeHeaderFrameDecoderTests extends ElasticsearchTestCase {
         threadPool.setNodeSettingsService(new NodeSettingsService(settings));
         NetworkService networkService = new NetworkService(settings);
         BigArrays bigArrays = new MockBigArrays(new MockPageCacheRecycler(settings, threadPool), new NoneCircuitBreakerService());
-        nettyTransport = new NettyTransport(settings, threadPool, networkService, bigArrays, Version.CURRENT);
+        nettyTransport = new NettyTransport(settings, threadPool, networkService, bigArrays, Version.CURRENT, new NamedWriteableRegistry());
         nettyTransport.start();
         TransportService transportService = new TransportService(nettyTransport, threadPool);
         nettyTransport.transportServiceAdapter(transportService.createAdapter());
 
         InetSocketTransportAddress transportAddress = (InetSocketTransportAddress) nettyTransport.boundAddress().boundAddress();
         port = transportAddress.address().getPort();
-        host = transportAddress.address().getHostString();
+        host = transportAddress.address().getAddress();
 
     }
 

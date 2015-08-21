@@ -41,9 +41,8 @@ import org.apache.lucene.search.spell.DirectSpellChecker;
 import org.apache.lucene.search.spell.SuggestMode;
 import org.apache.lucene.store.RAMDirectory;
 import org.apache.lucene.util.BytesRef;
-import org.apache.lucene.util.Version;
 import org.elasticsearch.search.suggest.phrase.NoisyChannelSpellChecker.Result;
-import org.elasticsearch.test.ElasticsearchTestCase;
+import org.elasticsearch.test.ESTestCase;
 import org.junit.Test;
 
 import java.io.*;
@@ -53,7 +52,7 @@ import java.util.Map;
 import static org.hamcrest.Matchers.equalTo;
 import static org.hamcrest.Matchers.greaterThan;
 
-public class NoisyChannelSpellCheckerTests extends ElasticsearchTestCase{
+public class NoisyChannelSpellCheckerTests extends ESTestCase {
     private final BytesRef space = new BytesRef(" ");
     private final BytesRef preTag = new BytesRef("<em>");
     private final BytesRef postTag = new BytesRef("</em>");
@@ -279,8 +278,12 @@ public class NoisyChannelSpellCheckerTests extends ElasticsearchTestCase{
         assertThat(corrections.length, equalTo(1));
         assertThat(corrections[0].join(new BytesRef(" ")).utf8ToString(), equalTo("xorr the god jewel"));
 
+        // Test a special case where one of the suggest term is unchanged by the postFilter, 'II' here is unchanged by the reverse analyzer.  
+        corrections = suggester.getCorrections(wrapper, new BytesRef("Quazar II"), generator, 1, 1, ir, "body", wordScorer, 1, 2).corrections;
+        assertThat(corrections.length, equalTo(1));
+        assertThat(corrections[0].join(new BytesRef(" ")).utf8ToString(), equalTo("quasar ii"));
     }
-    
+
     @Test
     public void testMarvelHerosTrigram() throws IOException {
         

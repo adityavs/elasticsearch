@@ -30,9 +30,8 @@ import org.elasticsearch.env.EnvironmentModule;
 import org.elasticsearch.index.Index;
 import org.elasticsearch.index.IndexNameModule;
 import org.elasticsearch.index.settings.IndexSettingsModule;
-import org.elasticsearch.indices.analysis.IndicesAnalysisModule;
 import org.elasticsearch.indices.analysis.IndicesAnalysisService;
-import org.elasticsearch.test.ElasticsearchTestCase;
+import org.elasticsearch.test.ESTestCase;
 import org.hamcrest.MatcherAssert;
 import org.junit.Test;
 
@@ -42,7 +41,7 @@ import static org.hamcrest.Matchers.instanceOf;
 
 /**
  */
-public class SimpleSmartChineseAnalysisTests extends ElasticsearchTestCase {
+public class SimpleSmartChineseAnalysisTests extends ESTestCase {
 
     @Test
     public void testDefaultsIcuAnalysis() {
@@ -51,7 +50,7 @@ public class SimpleSmartChineseAnalysisTests extends ElasticsearchTestCase {
                 .put("path.home", createTempDir())
                 .put(IndexMetaData.SETTING_VERSION_CREATED, Version.CURRENT)
                 .build();
-        Injector parentInjector = new ModulesBuilder().add(new SettingsModule(EMPTY_SETTINGS), new EnvironmentModule(new Environment(settings)), new IndicesAnalysisModule()).createInjector();
+        Injector parentInjector = new ModulesBuilder().add(new SettingsModule(EMPTY_SETTINGS), new EnvironmentModule(new Environment(settings))).createInjector();
         Injector injector = new ModulesBuilder().add(
                 new IndexSettingsModule(index, settings),
                 new IndexNameModule(index),

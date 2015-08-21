@@ -25,14 +25,14 @@ import org.elasticsearch.common.xcontent.XContentFactory;
 import org.elasticsearch.index.mapper.DocumentMapper;
 import org.elasticsearch.index.mapper.MapperParsingException;
 import org.elasticsearch.index.mapper.ParseContext.Document;
-import org.elasticsearch.test.ElasticsearchSingleNodeTest;
+import org.elasticsearch.test.ESSingleNodeTestCase;
 import org.junit.Test;
 
 import static org.hamcrest.Matchers.closeTo;
 
 /**
  */
-public class FieldLevelBoostTests extends ElasticsearchSingleNodeTest {
+public class FieldLevelBoostTests extends ESSingleNodeTestCase {
 
     @Test
     public void testFieldLevelBoost() throws Exception {
@@ -58,7 +58,7 @@ public class FieldLevelBoostTests extends ElasticsearchSingleNodeTest {
                 .startObject("long_field").field("boost", 8.0).field("value", 50).endObject()
                 .startObject("short_field").field("boost", 9.0).field("value", 60).endObject()
                 .bytes();
-        Document doc = docMapper.parse("person", "1", json).rootDoc();
+        Document doc = docMapper.parse("test", "person", "1", json).rootDoc();
 
         IndexableField f = doc.getField("str_field");
         assertThat((double) f.boost(), closeTo(2.0, 0.001));
@@ -100,7 +100,7 @@ public class FieldLevelBoostTests extends ElasticsearchSingleNodeTest {
 
         DocumentMapper docMapper = createIndex("test").mapperService().documentMapperParser().parse(mapping);
         try {
-            docMapper.parse("person", "1", XContentFactory.jsonBuilder().startObject()
+            docMapper.parse("test", "person", "1", XContentFactory.jsonBuilder().startObject()
                     .startObject("str_field").field("foo", "bar")
                     .endObject().bytes()).rootDoc();
             fail();
@@ -109,7 +109,7 @@ public class FieldLevelBoostTests extends ElasticsearchSingleNodeTest {
         }
 
         try {
-            docMapper.parse("person", "1", XContentFactory.jsonBuilder().startObject()
+            docMapper.parse("test", "person", "1", XContentFactory.jsonBuilder().startObject()
                     .startObject("int_field").field("foo", "bar")
                     .endObject().bytes()).rootDoc();
             fail();
@@ -118,7 +118,7 @@ public class FieldLevelBoostTests extends ElasticsearchSingleNodeTest {
         }
 
         try {
-            docMapper.parse("person", "1", XContentFactory.jsonBuilder().startObject()
+            docMapper.parse("test", "person", "1", XContentFactory.jsonBuilder().startObject()
                     .startObject("byte_field").field("foo", "bar")
                     .endObject().bytes()).rootDoc();
             fail();
@@ -127,7 +127,7 @@ public class FieldLevelBoostTests extends ElasticsearchSingleNodeTest {
         }
 
         try {
-            docMapper.parse("person", "1", XContentFactory.jsonBuilder().startObject()
+            docMapper.parse("test", "person", "1", XContentFactory.jsonBuilder().startObject()
                     .startObject("date_field").field("foo", "bar")
                     .endObject().bytes()).rootDoc();
             fail();
@@ -136,7 +136,7 @@ public class FieldLevelBoostTests extends ElasticsearchSingleNodeTest {
         }
 
         try {
-            docMapper.parse("person", "1", XContentFactory.jsonBuilder().startObject()
+            docMapper.parse("test", "person", "1", XContentFactory.jsonBuilder().startObject()
                     .startObject("double_field").field("foo", "bar")
                     .endObject().bytes()).rootDoc();
             fail();
@@ -145,7 +145,7 @@ public class FieldLevelBoostTests extends ElasticsearchSingleNodeTest {
         }
 
         try {
-            docMapper.parse("person", "1", XContentFactory.jsonBuilder().startObject()
+            docMapper.parse("test", "person", "1", XContentFactory.jsonBuilder().startObject()
                     .startObject("float_field").field("foo", "bar")
                     .endObject().bytes()).rootDoc();
             fail();
@@ -154,7 +154,7 @@ public class FieldLevelBoostTests extends ElasticsearchSingleNodeTest {
         }
 
         try {
-            docMapper.parse("person", "1", XContentFactory.jsonBuilder().startObject()
+            docMapper.parse("test", "person", "1", XContentFactory.jsonBuilder().startObject()
                     .startObject("long_field").field("foo", "bar")
                     .endObject().bytes()).rootDoc();
             fail();
@@ -163,7 +163,7 @@ public class FieldLevelBoostTests extends ElasticsearchSingleNodeTest {
         }
 
         try {
-            docMapper.parse("person", "1", XContentFactory.jsonBuilder().startObject()
+            docMapper.parse("test", "person", "1", XContentFactory.jsonBuilder().startObject()
                     .startObject("short_field").field("foo", "bar")
                     .endObject().bytes()).rootDoc();
             fail();

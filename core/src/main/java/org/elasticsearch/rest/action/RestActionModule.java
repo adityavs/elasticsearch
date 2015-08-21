@@ -20,6 +20,7 @@
 package org.elasticsearch.rest.action;
 
 import com.google.common.collect.Lists;
+
 import org.elasticsearch.common.inject.AbstractModule;
 import org.elasticsearch.common.inject.multibindings.Multibinder;
 import org.elasticsearch.rest.BaseRestHandler;
@@ -66,6 +67,7 @@ import org.elasticsearch.rest.action.admin.indices.open.RestOpenIndexAction;
 import org.elasticsearch.rest.action.admin.indices.optimize.RestOptimizeAction;
 import org.elasticsearch.rest.action.admin.indices.recovery.RestRecoveryAction;
 import org.elasticsearch.rest.action.admin.indices.refresh.RestRefreshAction;
+import org.elasticsearch.rest.action.admin.indices.shards.RestIndicesShardStoresAction;
 import org.elasticsearch.rest.action.admin.indices.segments.RestIndicesSegmentsAction;
 import org.elasticsearch.rest.action.admin.indices.settings.RestGetSettingsAction;
 import org.elasticsearch.rest.action.admin.indices.settings.RestUpdateSettingsAction;
@@ -76,6 +78,7 @@ import org.elasticsearch.rest.action.admin.indices.template.head.RestHeadIndexTe
 import org.elasticsearch.rest.action.admin.indices.template.put.RestPutIndexTemplateAction;
 import org.elasticsearch.rest.action.admin.indices.upgrade.RestUpgradeAction;
 import org.elasticsearch.rest.action.admin.indices.validate.query.RestValidateQueryAction;
+import org.elasticsearch.rest.action.admin.indices.validate.template.RestRenderSearchTemplateAction;
 import org.elasticsearch.rest.action.admin.indices.warmer.delete.RestDeleteWarmerAction;
 import org.elasticsearch.rest.action.admin.indices.warmer.get.RestGetWarmerAction;
 import org.elasticsearch.rest.action.admin.indices.warmer.put.RestPutWarmerAction;
@@ -153,6 +156,7 @@ public class RestActionModule extends AbstractModule {
         bind(RestGetIndicesAction.class).asEagerSingleton();
         bind(RestIndicesStatsAction.class).asEagerSingleton();
         bind(RestIndicesSegmentsAction.class).asEagerSingleton();
+        bind(RestIndicesShardStoresAction.class).asEagerSingleton();
         bind(RestGetAliasesAction.class).asEagerSingleton();
         bind(RestAliasesExistAction.class).asEagerSingleton();
         bind(RestIndexDeleteAliasesAction.class).asEagerSingleton();
@@ -207,6 +211,7 @@ public class RestActionModule extends AbstractModule {
         bind(RestSearchScrollAction.class).asEagerSingleton();
         bind(RestClearScrollAction.class).asEagerSingleton();
         bind(RestMultiSearchAction.class).asEagerSingleton();
+        bind(RestRenderSearchTemplateAction.class).asEagerSingleton();
 
         bind(RestValidateQueryAction.class).asEagerSingleton();
 
@@ -245,6 +250,7 @@ public class RestActionModule extends AbstractModule {
         catActionMultibinder.addBinding().to(RestThreadPoolAction.class).asEagerSingleton();
         catActionMultibinder.addBinding().to(RestPluginsAction.class).asEagerSingleton();
         catActionMultibinder.addBinding().to(RestFielddataAction.class).asEagerSingleton();
+        catActionMultibinder.addBinding().to(RestNodeAttrsAction.class).asEagerSingleton();
         // no abstract cat action
         bind(RestCatAction.class).asEagerSingleton();
     }

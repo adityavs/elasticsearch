@@ -28,7 +28,7 @@ import org.elasticsearch.cluster.routing.RoutingNodes;
 import org.elasticsearch.cluster.routing.RoutingTable;
 import org.elasticsearch.common.logging.ESLogger;
 import org.elasticsearch.common.logging.Loggers;
-import org.elasticsearch.test.ElasticsearchAllocationTestCase;
+import org.elasticsearch.test.ESAllocationTestCase;
 import org.junit.Test;
 
 import static org.elasticsearch.cluster.routing.ShardRoutingState.*;
@@ -38,7 +38,7 @@ import static org.hamcrest.Matchers.*;
 /**
  *
  */
-public class UpdateNumberOfReplicasTests extends ElasticsearchAllocationTestCase {
+public class UpdateNumberOfReplicasTests extends ESAllocationTestCase {
 
     private final ESLogger logger = Loggers.getLogger(UpdateNumberOfReplicasTests.class);
 
@@ -75,13 +75,13 @@ public class UpdateNumberOfReplicasTests extends ElasticsearchAllocationTestCase
         clusterState = ClusterState.builder(clusterState).routingTable(routingTable).build();
 
         logger.info("Start all the primary shards");
-        RoutingNodes routingNodes = clusterState.routingNodes();
+        RoutingNodes routingNodes = clusterState.getRoutingNodes();
         prevRoutingTable = routingTable;
         routingTable = strategy.applyStartedShards(clusterState, routingNodes.shardsWithState(INITIALIZING)).routingTable();
         clusterState = ClusterState.builder(clusterState).routingTable(routingTable).build();
 
         logger.info("Start all the replica shards");
-        routingNodes = clusterState.routingNodes();
+        routingNodes = clusterState.getRoutingNodes();
         prevRoutingTable = routingTable;
         routingTable = strategy.applyStartedShards(clusterState, routingNodes.shardsWithState(INITIALIZING)).routingTable();
         clusterState = ClusterState.builder(clusterState).routingTable(routingTable).build();
@@ -100,7 +100,7 @@ public class UpdateNumberOfReplicasTests extends ElasticsearchAllocationTestCase
 
 
         logger.info("add another replica");
-        routingNodes = clusterState.routingNodes();
+        routingNodes = clusterState.getRoutingNodes();
         prevRoutingTable = routingTable;
         routingTable = RoutingTable.builder(routingTable).updateNumberOfReplicas(2).build();
         metaData = MetaData.builder(clusterState.metaData()).updateNumberOfReplicas(2).build();
@@ -135,7 +135,7 @@ public class UpdateNumberOfReplicasTests extends ElasticsearchAllocationTestCase
         assertThat(routingTable.index("test").shard(0).replicaShardsWithState(INITIALIZING).size(), equalTo(1));
         assertThat(routingTable.index("test").shard(0).replicaShardsWithState(INITIALIZING).get(0).currentNodeId(), equalTo("node3"));
 
-        routingNodes = clusterState.routingNodes();
+        routingNodes = clusterState.getRoutingNodes();
         prevRoutingTable = routingTable;
         routingTable = strategy.applyStartedShards(clusterState, routingNodes.shardsWithState(INITIALIZING)).routingTable();
         clusterState = ClusterState.builder(clusterState).routingTable(routingTable).build();
@@ -151,7 +151,7 @@ public class UpdateNumberOfReplicasTests extends ElasticsearchAllocationTestCase
         assertThat(routingTable.index("test").shard(0).replicaShardsWithState(STARTED).get(1).currentNodeId(), anyOf(equalTo(nodeHoldingReplica), equalTo("node3")));
 
         logger.info("now remove a replica");
-        routingNodes = clusterState.routingNodes();
+        routingNodes = clusterState.getRoutingNodes();
         prevRoutingTable = routingTable;
         routingTable = RoutingTable.builder(routingTable).updateNumberOfReplicas(1).build();
         metaData = MetaData.builder(clusterState.metaData()).updateNumberOfReplicas(1).build();

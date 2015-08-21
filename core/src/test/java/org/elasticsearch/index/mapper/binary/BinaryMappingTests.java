@@ -32,7 +32,7 @@ import org.elasticsearch.index.mapper.DocumentMapper;
 import org.elasticsearch.index.mapper.FieldMapper;
 import org.elasticsearch.index.mapper.ParsedDocument;
 import org.elasticsearch.index.mapper.core.BinaryFieldMapper;
-import org.elasticsearch.test.ElasticsearchSingleNodeTest;
+import org.elasticsearch.test.ESSingleNodeTestCase;
 
 import java.io.IOException;
 import java.util.Arrays;
@@ -42,7 +42,7 @@ import static org.hamcrest.Matchers.instanceOf;
 
 /**
  */
-public class BinaryMappingTests extends ElasticsearchSingleNodeTest {
+public class BinaryMappingTests extends ESSingleNodeTestCase {
 
     public void testDefaultMapping() throws Exception {
         String mapping = XContentFactory.jsonBuilder().startObject().startObject("type")
@@ -85,7 +85,7 @@ public class BinaryMappingTests extends ElasticsearchSingleNodeTest {
         assertTrue(CompressorFactory.isCompressed(new BytesArray(binaryValue2)));
         
         for (byte[] value : Arrays.asList(binaryValue1, binaryValue2)) {
-            ParsedDocument doc = mapper.parse("type", "id", XContentFactory.jsonBuilder().startObject().field("field", value).endObject().bytes());
+            ParsedDocument doc = mapper.parse("test", "type", "id", XContentFactory.jsonBuilder().startObject().field("field", value).endObject().bytes());
             BytesRef indexedValue = doc.rootDoc().getBinaryValue("field");
             assertEquals(new BytesRef(value), indexedValue);
             FieldMapper fieldMapper = mapper.mappers().smartNameFieldMapper("field");
@@ -116,7 +116,7 @@ public class BinaryMappingTests extends ElasticsearchSingleNodeTest {
         final byte[] binaryValue = out.bytes().toBytes();
         assertTrue(CompressorFactory.isCompressed(new BytesArray(binaryValue)));
         
-        ParsedDocument doc = mapper.parse("type", "id", XContentFactory.jsonBuilder().startObject().field("field", binaryValue).endObject().bytes());
+        ParsedDocument doc = mapper.parse("test", "type", "id", XContentFactory.jsonBuilder().startObject().field("field", binaryValue).endObject().bytes());
         BytesRef indexedValue = doc.rootDoc().getBinaryValue("field");
         assertEquals(new BytesRef(binaryValue), indexedValue);
         FieldMapper fieldMapper = mapper.mappers().smartNameFieldMapper("field");

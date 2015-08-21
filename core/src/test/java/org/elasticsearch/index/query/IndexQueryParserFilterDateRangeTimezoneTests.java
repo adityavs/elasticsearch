@@ -29,7 +29,7 @@ import org.elasticsearch.index.IndexService;
 import org.elasticsearch.index.mapper.MapperService;
 import org.elasticsearch.index.mapper.ParsedDocument;
 import org.elasticsearch.search.internal.SearchContext;
-import org.elasticsearch.test.ElasticsearchSingleNodeTest;
+import org.elasticsearch.test.ESSingleNodeTestCase;
 import org.elasticsearch.test.TestSearchContext;
 import org.joda.time.DateTime;
 import org.joda.time.DateTimeZone;
@@ -38,8 +38,8 @@ import org.junit.Test;
 
 import java.io.IOException;
 
-import static org.elasticsearch.common.io.Streams.copyToBytesFromClasspath;
-import static org.elasticsearch.common.io.Streams.copyToStringFromClasspath;
+import static org.elasticsearch.test.StreamsUtils.copyToBytesFromClasspath;
+import static org.elasticsearch.test.StreamsUtils.copyToStringFromClasspath;
 import static org.hamcrest.Matchers.instanceOf;
 import static org.hamcrest.Matchers.is;
 import static org.hamcrest.Matchers.lessThanOrEqualTo;
@@ -47,7 +47,7 @@ import static org.hamcrest.Matchers.lessThanOrEqualTo;
 /**
  *
  */
-public class IndexQueryParserFilterDateRangeTimezoneTests extends ElasticsearchSingleNodeTest {
+public class IndexQueryParserFilterDateRangeTimezoneTests extends ESSingleNodeTestCase {
 
     private Injector injector;
     private IndexQueryParserService queryParser;
@@ -60,7 +60,7 @@ public class IndexQueryParserFilterDateRangeTimezoneTests extends ElasticsearchS
         MapperService mapperService = indexService.mapperService();
         String mapping = copyToStringFromClasspath("/org/elasticsearch/index/query/mapping.json");
         mapperService.merge("person", new CompressedXContent(mapping), true, false);
-        ParsedDocument doc = mapperService.documentMapper("person").parse("person", "1", new BytesArray(copyToBytesFromClasspath("/org/elasticsearch/index/query/data.json")));
+        ParsedDocument doc = mapperService.documentMapper("person").parse("test", "person", "1", new BytesArray(copyToBytesFromClasspath("/org/elasticsearch/index/query/data.json")));
         assertNotNull(doc.dynamicMappingsUpdate());
         client().admin().indices().preparePutMapping("test").setType("person").setSource(doc.dynamicMappingsUpdate().toString()).get();
         queryParser = injector.getInstance(IndexQueryParserService.class);
@@ -99,7 +99,7 @@ public class IndexQueryParserFilterDateRangeTimezoneTests extends ElasticsearchS
         Query parsedQuery;
         try {
             SearchContext.setCurrent(new TestSearchContext());
-            parsedQuery = queryParser.parse(query).query();
+            parsedQuery = queryParser.parse(query).query().rewrite(null);
         } finally {
             SearchContext.removeCurrent();
         }

@@ -18,45 +18,57 @@
  */
 package org.elasticsearch.index.shard;
 
-import org.elasticsearch.ElasticsearchException;
+import org.apache.lucene.index.CorruptIndexException;
+import org.apache.lucene.store.LockObtainFailedException;
+import org.apache.lucene.util.IOUtils;
 import org.elasticsearch.Version;
 import org.elasticsearch.action.admin.indices.stats.IndexStats;
+import org.elasticsearch.action.search.SearchResponse;
+import org.elasticsearch.action.support.IndicesOptions;
+import org.elasticsearch.cluster.*;
 import org.elasticsearch.cluster.metadata.IndexMetaData;
 import org.elasticsearch.cluster.routing.ShardRouting;
 import org.elasticsearch.cluster.routing.ShardRoutingState;
+import org.elasticsearch.cluster.routing.TestShardRouting;
 import org.elasticsearch.common.bytes.BytesArray;
 import org.elasticsearch.common.logging.ESLogger;
 import org.elasticsearch.common.settings.Settings;
+import org.elasticsearch.env.Environment;
 import org.elasticsearch.env.NodeEnvironment;
 import org.elasticsearch.env.ShardLock;
 import org.elasticsearch.index.IndexService;
 import org.elasticsearch.index.engine.Engine;
 import org.elasticsearch.index.query.QueryParsingException;
+import org.elasticsearch.index.settings.IndexSettingsService;
 import org.elasticsearch.index.store.Store;
 import org.elasticsearch.index.translog.Translog;
 import org.elasticsearch.index.translog.TranslogConfig;
 import org.elasticsearch.indices.IndicesService;
 import org.elasticsearch.test.DummyShardLock;
-import org.elasticsearch.test.ElasticsearchSingleNodeTest;
+import org.elasticsearch.test.ESSingleNodeTestCase;
 import org.elasticsearch.test.VersionUtils;
 import org.junit.Test;
 
 import java.io.IOException;
+import java.nio.file.Files;
 import java.nio.file.Path;
+import java.nio.file.StandardCopyOption;
 import java.util.HashSet;
 import java.util.Set;
 import java.util.concurrent.ExecutionException;
 
 import static org.elasticsearch.cluster.metadata.IndexMetaData.*;
 import static org.elasticsearch.common.settings.Settings.settingsBuilder;
+import static org.elasticsearch.index.query.QueryBuilders.matchAllQuery;
 import static org.elasticsearch.test.hamcrest.ElasticsearchAssertions.assertAcked;
+import static org.elasticsearch.test.hamcrest.ElasticsearchAssertions.assertHitCount;
 import static org.elasticsearch.test.hamcrest.ElasticsearchAssertions.assertNoFailures;
 import static org.hamcrest.Matchers.equalTo;
 
 /**
  * Simple unit-test IndexShard related operations.
  */
-public class IndexShardTests extends ElasticsearchSingleNodeTest {
+public class IndexShardTests extends ESSingleNodeTestCase {
 
     public void testFlushOnDeleteSetting() throws Exception {
         boolean initValue = randomBoolean();
@@ -107,7 +119,6 @@ public class IndexShardTests extends ElasticsearchSingleNodeTest {
     public void testLockTryingToDelete() throws Exception {
         createIndex("test");
         ensureGreen();
-        //IndicesService indicesService = getInstanceFromNode(IndicesService.class);
         NodeEnvironment env = getInstanceFromNode(NodeEnvironment.class);
         Path[] shardPaths = env.availableShardPaths(new ShardId("test", 0));
         logger.info("--> paths: [{}]", shardPaths);
@@ -115,7 +126,7 @@ public class IndexShardTests extends ElasticsearchSingleNodeTest {
         try {
             NodeEnvironment.acquireFSLockForPaths(Settings.EMPTY, shardPaths);
             fail("should not have been able to acquire the lock");
-        } catch (ElasticsearchException e) {
+        } catch (LockObtainFailedException e) {
             assertTrue("msg: " + e.getMessage(), e.getMessage().contains("unable to acquire write.lock"));
         }
         // Test without the regular shard lock to assume we can acquire it
@@ -125,7 +136,7 @@ public class IndexShardTests extends ElasticsearchSingleNodeTest {
         try {
             env.deleteShardDirectoryUnderLock(sLock, Settings.builder().build());
             fail("should not have been able to delete the directory");
-        } catch (ElasticsearchException e) {
+        } catch (LockObtainFailedException e) {
             assertTrue("msg: " + e.getMessage(), e.getMessage().contains("unable to acquire write.lock"));
         }
     }
@@ -144,39 +155,39 @@ public class IndexShardTests extends ElasticsearchSingleNodeTest {
 
         shardStateMetaData = load(logger, env.availableShardPaths(shard.shardId));
         assertEquals(shardStateMetaData, getShardStateMetadata(shard));
-        assertEquals(shardStateMetaData, new ShardStateMetaData(routing.version(), routing.primary(), shard.indexSettings.get(IndexMetaData.SETTING_UUID)));
+        assertEquals(shardStateMetaData, new ShardStateMetaData(routing.version(), routing.primary(), shard.indexSettings.get(IndexMetaData.SETTING_INDEX_UUID)));
 
         routing = new ShardRouting(shard.shardRouting, shard.shardRouting.version() + 1);
         shard.updateRoutingEntry(routing, true);
         shardStateMetaData = load(logger, env.availableShardPaths(shard.shardId));
         assertEquals(shardStateMetaData, getShardStateMetadata(shard));
-        assertEquals(shardStateMetaData, new ShardStateMetaData(routing.version(), routing.primary(), shard.indexSettings.get(IndexMetaData.SETTING_UUID)));
+        assertEquals(shardStateMetaData, new ShardStateMetaData(routing.version(), routing.primary(), shard.indexSettings.get(IndexMetaData.SETTING_INDEX_UUID)));
 
         routing = new ShardRouting(shard.shardRouting, shard.shardRouting.version() + 1);
         shard.updateRoutingEntry(routing, true);
         shardStateMetaData = load(logger, env.availableShardPaths(shard.shardId));
         assertEquals(shardStateMetaData, getShardStateMetadata(shard));
-        assertEquals(shardStateMetaData, new ShardStateMetaData(routing.version(), routing.primary(), shard.indexSettings.get(IndexMetaData.SETTING_UUID)));
+        assertEquals(shardStateMetaData, new ShardStateMetaData(routing.version(), routing.primary(), shard.indexSettings.get(IndexMetaData.SETTING_INDEX_UUID)));
 
         // test if we still write it even if the shard is not active
-        ShardRouting inactiveRouting = new ShardRouting(shard.shardRouting.index(), shard.shardRouting.shardId().id(), shard.shardRouting.currentNodeId(), null, null, true, ShardRoutingState.INITIALIZING, shard.shardRouting.version() + 1);
+        ShardRouting inactiveRouting = TestShardRouting.newShardRouting(shard.shardRouting.index(), shard.shardRouting.shardId().id(), shard.shardRouting.currentNodeId(), null, null, true, ShardRoutingState.INITIALIZING, shard.shardRouting.version() + 1);
         shard.persistMetadata(inactiveRouting, shard.shardRouting);
         shardStateMetaData = load(logger, env.availableShardPaths(shard.shardId));
         assertEquals("inactive shard state shouldn't be persisted", shardStateMetaData, getShardStateMetadata(shard));
-        assertEquals("inactive shard state shouldn't be persisted", shardStateMetaData, new ShardStateMetaData(routing.version(), routing.primary(), shard.indexSettings.get(IndexMetaData.SETTING_UUID)));
+        assertEquals("inactive shard state shouldn't be persisted", shardStateMetaData, new ShardStateMetaData(routing.version(), routing.primary(), shard.indexSettings.get(IndexMetaData.SETTING_INDEX_UUID)));
 
 
         shard.updateRoutingEntry(new ShardRouting(shard.shardRouting, shard.shardRouting.version() + 1), false);
         shardStateMetaData = load(logger, env.availableShardPaths(shard.shardId));
         assertFalse("shard state persisted despite of persist=false", shardStateMetaData.equals(getShardStateMetadata(shard)));
-        assertEquals("shard state persisted despite of persist=false", shardStateMetaData, new ShardStateMetaData(routing.version(), routing.primary(), shard.indexSettings.get(IndexMetaData.SETTING_UUID)));
+        assertEquals("shard state persisted despite of persist=false", shardStateMetaData, new ShardStateMetaData(routing.version(), routing.primary(), shard.indexSettings.get(IndexMetaData.SETTING_INDEX_UUID)));
 
 
         routing = new ShardRouting(shard.shardRouting, shard.shardRouting.version() + 1);
         shard.updateRoutingEntry(routing, true);
         shardStateMetaData = load(logger, env.availableShardPaths(shard.shardId));
         assertEquals(shardStateMetaData, getShardStateMetadata(shard));
-        assertEquals(shardStateMetaData, new ShardStateMetaData(routing.version(), routing.primary(), shard.indexSettings.get(IndexMetaData.SETTING_UUID)));
+        assertEquals(shardStateMetaData, new ShardStateMetaData(routing.version(), routing.primary(), shard.indexSettings.get(IndexMetaData.SETTING_INDEX_UUID)));
     }
 
     public void testDeleteShardState() throws IOException {
@@ -197,7 +208,7 @@ public class IndexShardTests extends ElasticsearchSingleNodeTest {
         ShardStateMetaData shardStateMetaData = load(logger, env.availableShardPaths(shard.shardId));
         assertEquals(shardStateMetaData, getShardStateMetadata(shard));
 
-        routing = new ShardRouting(shard.shardId.index().getName(), shard.shardId.id(), routing.currentNodeId(), null, null, routing.primary(), ShardRoutingState.INITIALIZING, shard.shardRouting.version() + 1);
+        routing = TestShardRouting.newShardRouting(shard.shardId.index().getName(), shard.shardId.id(), routing.currentNodeId(), null, routing.primary(), ShardRoutingState.INITIALIZING, shard.shardRouting.allocationId(), shard.shardRouting.version() + 1);
         shard.updateRoutingEntry(routing, true);
         shard.deleteShardState();
 
@@ -214,7 +225,7 @@ public class IndexShardTests extends ElasticsearchSingleNodeTest {
         IndexService test = indicesService.indexService("test");
         IndexShard shard = test.shard(0);
         // fail shard
-        shard.failShard("test shard fail", new IOException("corrupted"));
+        shard.failShard("test shard fail", new CorruptIndexException("", ""));
         // check state file still exists
         ShardStateMetaData shardStateMetaData = load(logger, env.availableShardPaths(shard.shardId));
         assertEquals(shardStateMetaData, getShardStateMetadata(shard));
@@ -229,7 +240,7 @@ public class IndexShardTests extends ElasticsearchSingleNodeTest {
         if (shardRouting == null) {
             return null;
         } else {
-            return new ShardStateMetaData(shardRouting.version(), shardRouting.primary(), shard.indexSettings.get(IndexMetaData.SETTING_UUID));
+            return new ShardStateMetaData(shardRouting.version(), shardRouting.primary(), shard.indexSettings.get(IndexMetaData.SETTING_INDEX_UUID));
         }
     }
 
@@ -296,7 +307,7 @@ public class IndexShardTests extends ElasticsearchSingleNodeTest {
         assertBusy(new Runnable() { // should be very very quick
             @Override
             public void run() {
-                IndexStats indexStats = client().admin().indices().prepareStats("test").get().getIndex("test");
+                IndexStats indexStats = client().admin().indices().prepareStats("test").clear().get().getIndex("test");
                 assertNotNull(indexStats.getShards()[0].getCommitStats().getUserData().get(Engine.SYNC_COMMIT_ID));
             }
         });
@@ -393,5 +404,139 @@ public class IndexShardTests extends ElasticsearchSingleNodeTest {
         assertEquals(versionCreated.luceneVersion, test.minimumCompatibleVersion());
         test.engine().flush();
         assertEquals(Version.CURRENT.luceneVersion, test.minimumCompatibleVersion());
+    }
+
+    public void testUpdatePriority() {
+        assertAcked(client().admin().indices().prepareCreate("test")
+                .setSettings(IndexMetaData.SETTING_PRIORITY, 200));
+        IndexSettingsService indexSettingsService = getInstanceFromNode(IndicesService.class).indexService("test").settingsService();
+        assertEquals(200, indexSettingsService.getSettings().getAsInt(IndexMetaData.SETTING_PRIORITY, 0).intValue());
+        client().admin().indices().prepareUpdateSettings("test").setSettings(Settings.builder().put(IndexMetaData.SETTING_PRIORITY, 400).build()).get();
+        assertEquals(400, indexSettingsService.getSettings().getAsInt(IndexMetaData.SETTING_PRIORITY, 0).intValue());
+    }
+
+    public void testRecoverIntoLeftover() throws IOException {
+        createIndex("test");
+        ensureGreen("test");
+        client().prepareIndex("test", "bar", "1").setSource("{}").setRefresh(true).get();
+        client().admin().indices().prepareFlush("test").get();
+        SearchResponse response = client().prepareSearch("test").get();
+        assertHitCount(response, 1l);
+        IndicesService indicesService = getInstanceFromNode(IndicesService.class);
+        IndexService test = indicesService.indexService("test");
+        IndexShard shard = test.shard(0);
+        ShardPath shardPath = shard.shardPath();
+        Path dataPath = shardPath.getDataPath();
+        client().admin().indices().prepareClose("test").get();
+        Path tempDir = createTempDir();
+        Files.move(dataPath, tempDir.resolve("test"));
+        client().admin().indices().prepareDelete("test").get();
+        Files.createDirectories(dataPath.getParent());
+        Files.move(tempDir.resolve("test"), dataPath);
+        createIndex("test");
+        ensureGreen("test");
+        response = client().prepareSearch("test").get();
+        assertHitCount(response, 0l);
+    }
+
+    public void testIndexDirIsDeletedWhenShardRemoved() throws Exception {
+        Environment env = getInstanceFromNode(Environment.class);
+        Path idxPath = env.sharedDataFile().resolve(randomAsciiOfLength(10));
+        logger.info("--> idxPath: [{}]", idxPath);
+        Settings idxSettings = Settings.builder()
+                .put(IndexMetaData.SETTING_DATA_PATH, idxPath)
+                .build();
+        createIndex("test", idxSettings);
+        ensureGreen("test");
+        client().prepareIndex("test", "bar", "1").setSource("{}").setRefresh(true).get();
+        SearchResponse response = client().prepareSearch("test").get();
+        assertHitCount(response, 1l);
+        client().admin().indices().prepareDelete("test").get();
+        assertPathHasBeenCleared(idxPath);
+    }
+
+    public void testExpectedShardSizeIsPresent() throws InterruptedException {
+        assertAcked(client().admin().indices().prepareCreate("test")
+                .setSettings(SETTING_NUMBER_OF_SHARDS, 1, SETTING_NUMBER_OF_REPLICAS, 0));
+        for (int i = 0; i < 50; i++) {
+            client().prepareIndex("test", "test").setSource("{}").get();
+        }
+        ensureGreen("test");
+        InternalClusterInfoService clusterInfoService = (InternalClusterInfoService) getInstanceFromNode(ClusterInfoService.class);
+        InternalClusterInfoService.ClusterInfoUpdateJob job = clusterInfoService.new ClusterInfoUpdateJob(false);
+        job.run();
+        ClusterState state = getInstanceFromNode(ClusterService.class).state();
+        Long test = clusterInfoService.getClusterInfo().getShardSize(state.getRoutingTable().index("test").getShards().get(0).primaryShard());
+        assertNotNull(test);
+        assertTrue(test > 0);
+    }
+
+    public void testIndexCanChangeCustomDataPath() throws Exception {
+        Environment env = getInstanceFromNode(Environment.class);
+        Path idxPath = env.sharedDataFile().resolve(randomAsciiOfLength(10));
+        final String INDEX = "idx";
+        Path startDir = idxPath.resolve("start-" + randomAsciiOfLength(10));
+        Path endDir = idxPath.resolve("end-" + randomAsciiOfLength(10));
+        logger.info("--> start dir: [{}]", startDir.toAbsolutePath().toString());
+        logger.info("-->   end dir: [{}]", endDir.toAbsolutePath().toString());
+        // temp dirs are automatically created, but the end dir is what
+        // startDir is going to be renamed as, so it needs to be deleted
+        // otherwise we get all sorts of errors about the directory
+        // already existing
+        IOUtils.rm(endDir);
+
+        Settings sb = Settings.builder()
+                .put(IndexMetaData.SETTING_DATA_PATH, startDir.toAbsolutePath().toString())
+                .build();
+        Settings sb2 = Settings.builder()
+                .put(IndexMetaData.SETTING_DATA_PATH, endDir.toAbsolutePath().toString())
+                .build();
+
+        logger.info("--> creating an index with data_path [{}]", startDir.toAbsolutePath().toString());
+        createIndex(INDEX, sb);
+        ensureGreen(INDEX);
+        client().prepareIndex(INDEX, "bar", "1").setSource("{}").setRefresh(true).get();
+
+        SearchResponse resp = client().prepareSearch(INDEX).setQuery(matchAllQuery()).get();
+        assertThat("found the hit", resp.getHits().getTotalHits(), equalTo(1L));
+
+        logger.info("--> closing the index [{}]", INDEX);
+        client().admin().indices().prepareClose(INDEX).get();
+        logger.info("--> index closed, re-opening...");
+        client().admin().indices().prepareOpen(INDEX).get();
+        logger.info("--> index re-opened");
+        ensureGreen(INDEX);
+
+        resp = client().prepareSearch(INDEX).setQuery(matchAllQuery()).get();
+        assertThat("found the hit", resp.getHits().getTotalHits(), equalTo(1L));
+
+        // Now, try closing and changing the settings
+
+        logger.info("--> closing the index [{}]", INDEX);
+        client().admin().indices().prepareClose(INDEX).get();
+
+        logger.info("--> moving data on disk [{}] to [{}]", startDir.getFileName(), endDir.getFileName());
+        assert Files.exists(endDir) == false : "end directory should not exist!";
+        Files.move(startDir, endDir, StandardCopyOption.REPLACE_EXISTING);
+
+        logger.info("--> updating settings...");
+        client().admin().indices().prepareUpdateSettings(INDEX)
+                .setSettings(sb2)
+                .setIndicesOptions(IndicesOptions.fromOptions(true, false, true, true))
+                .get();
+
+        assert Files.exists(startDir) == false : "start dir shouldn't exist";
+
+        logger.info("--> settings updated and files moved, re-opening index");
+        client().admin().indices().prepareOpen(INDEX).get();
+        logger.info("--> index re-opened");
+        ensureGreen(INDEX);
+
+        resp = client().prepareSearch(INDEX).setQuery(matchAllQuery()).get();
+        assertThat("found the hit", resp.getHits().getTotalHits(), equalTo(1L));
+
+        assertAcked(client().admin().indices().prepareDelete(INDEX));
+        assertPathHasBeenCleared(startDir.toAbsolutePath().toString());
+        assertPathHasBeenCleared(endDir.toAbsolutePath().toString());
     }
 }

@@ -20,9 +20,9 @@ package org.elasticsearch.test;
 
 import com.carrotsearch.hppc.ObjectObjectAssociativeContainer;
 
+import org.apache.lucene.search.Collector;
 import org.apache.lucene.search.Filter;
 import org.apache.lucene.search.Query;
-import org.apache.lucene.search.ScoreDoc;
 import org.apache.lucene.search.Sort;
 import org.apache.lucene.util.Counter;
 import org.elasticsearch.action.search.SearchType;
@@ -30,12 +30,12 @@ import org.elasticsearch.cache.recycler.PageCacheRecycler;
 import org.elasticsearch.common.HasContext;
 import org.elasticsearch.common.HasContextAndHeaders;
 import org.elasticsearch.common.HasHeaders;
+import org.elasticsearch.common.ParseFieldMatcher;
 import org.elasticsearch.common.collect.ImmutableOpenMap;
 import org.elasticsearch.common.util.BigArrays;
 import org.elasticsearch.index.IndexService;
 import org.elasticsearch.index.analysis.AnalysisService;
 import org.elasticsearch.index.cache.bitset.BitsetFilterCache;
-import org.elasticsearch.index.cache.query.QueryCache;
 import org.elasticsearch.index.fielddata.IndexFieldDataService;
 import org.elasticsearch.index.mapper.MappedFieldType;
 import org.elasticsearch.index.mapper.MapperService;
@@ -45,17 +45,18 @@ import org.elasticsearch.index.query.ParsedQuery;
 import org.elasticsearch.index.shard.IndexShard;
 import org.elasticsearch.index.similarity.SimilarityService;
 import org.elasticsearch.script.ScriptService;
-import org.elasticsearch.search.Scroll;
 import org.elasticsearch.search.SearchShardTarget;
 import org.elasticsearch.search.aggregations.SearchContextAggregations;
 import org.elasticsearch.search.dfs.DfsSearchResult;
 import org.elasticsearch.search.fetch.FetchSearchResult;
-import org.elasticsearch.search.fetch.fielddata.FieldDataFieldsContext;
+import org.elasticsearch.search.fetch.FetchSubPhase;
+import org.elasticsearch.search.fetch.FetchSubPhaseContext;
 import org.elasticsearch.search.fetch.innerhits.InnerHitsContext;
 import org.elasticsearch.search.fetch.script.ScriptFieldsContext;
 import org.elasticsearch.search.fetch.source.FetchSourceContext;
 import org.elasticsearch.search.highlight.SearchContextHighlight;
 import org.elasticsearch.search.internal.ContextIndexSearcher;
+import org.elasticsearch.search.internal.ScrollContext;
 import org.elasticsearch.search.internal.SearchContext;
 import org.elasticsearch.search.internal.ShardSearchRequest;
 import org.elasticsearch.search.lookup.SearchLookup;
@@ -66,7 +67,9 @@ import org.elasticsearch.search.suggest.SuggestionSearchContext;
 import org.elasticsearch.threadpool.ThreadPool;
 
 import java.util.Collections;
+import java.util.HashMap;
 import java.util.List;
+import java.util.Map;
 import java.util.Set;
 
 public class TestSearchContext extends SearchContext {
@@ -77,6 +80,8 @@ public class TestSearchContext extends SearchContext {
     final IndexFieldDataService indexFieldDataService;
     final BitsetFilterCache fixedBitSetFilterCache;
     final ThreadPool threadPool;
+    final Map<Class<?>, Collector> queryCollectors = new HashMap<>();
+    final IndexShard indexShard;
 
     ContextIndexSearcher searcher;
     int size;
@@ -84,22 +89,29 @@ public class TestSearchContext extends SearchContext {
     private String[] types;
     private SearchContextAggregations aggregations;
 
-    public TestSearchContext(ThreadPool threadPool,PageCacheRecycler pageCacheRecycler, BigArrays bigArrays, IndexService indexService, QueryCache filterCache, IndexFieldDataService indexFieldDataService) {
+    private final long originNanoTime = System.nanoTime();
+    private final Map<String, FetchSubPhaseContext> subPhaseContexts = new HashMap<>();
+
+    public TestSearchContext(ThreadPool threadPool,PageCacheRecycler pageCacheRecycler, BigArrays bigArrays, IndexService indexService) {
+        super(ParseFieldMatcher.STRICT);
         this.pageCacheRecycler = pageCacheRecycler;
         this.bigArrays = bigArrays.withCircuitBreaking();
         this.indexService = indexService;
         this.indexFieldDataService = indexService.fieldData();
         this.fixedBitSetFilterCache = indexService.bitsetFilterCache();
         this.threadPool = threadPool;
+        this.indexShard = indexService.shard(0);
     }
 
     public TestSearchContext() {
+        super(ParseFieldMatcher.STRICT);
         this.pageCacheRecycler = null;
         this.bigArrays = null;
         this.indexService = null;
         this.indexFieldDataService = null;
         this.threadPool = null;
         this.fixedBitSetFilterCache = null;
+        this.indexShard = null;
     }
 
     public void setTypes(String... types) {
@@ -171,18 +183,23 @@ public class TestSearchContext extends SearchContext {
     }
 
     @Override
+    public long getOriginNanoTime() {
+        return originNanoTime;
+    }
+
+    @Override
     protected long nowInMillisImpl() {
         return 0;
     }
 
     @Override
-    public Scroll scroll() {
+    public ScrollContext scrollContext() {
         return null;
     }
 
     @Override
-    public SearchContext scroll(Scroll scroll) {
-        return null;
+    public SearchContext scrollContext(ScrollContext scrollContext) {
+        throw new UnsupportedOperationException();
     }
 
     @Override
@@ -194,6 +211,15 @@ public class TestSearchContext extends SearchContext {
     public SearchContext aggregations(SearchContextAggregations aggregations) {
         this.aggregations = aggregations;
         return this;
+    }
+
+    @Override
+    public <SubPhaseContext extends FetchSubPhaseContext> SubPhaseContext getFetchSubPhaseContext(FetchSubPhase.ContextFactory<SubPhaseContext> contextFactory) {
+        String subPhaseName = contextFactory.getName();
+        if (subPhaseContexts.get(subPhaseName) == null) {
+            subPhaseContexts.put(subPhaseName, contextFactory.newContextInstance());
+        }
+        return (SubPhaseContext) subPhaseContexts.get(subPhaseName);
     }
 
     @Override
@@ -221,16 +247,6 @@ public class TestSearchContext extends SearchContext {
 
     @Override
     public void addRescore(RescoreSearchContext rescore) {
-    }
-
-    @Override
-    public boolean hasFieldDataFields() {
-        return false;
-    }
-
-    @Override
-    public FieldDataFieldsContext fieldDataFields() {
-        return null;
     }
 
     @Override
@@ -274,7 +290,7 @@ public class TestSearchContext extends SearchContext {
 
     @Override
     public IndexShard indexShard() {
-        return null;
+        return indexShard;
     }
 
     @Override
@@ -405,16 +421,6 @@ public class TestSearchContext extends SearchContext {
     }
 
     @Override
-    public boolean queryRewritten() {
-        return false;
-    }
-
-    @Override
-    public SearchContext updateRewriteQuery(Query rewriteQuery) {
-        return null;
-    }
-
-    @Override
     public int from() {
         return 0;
     }
@@ -516,15 +522,6 @@ public class TestSearchContext extends SearchContext {
 
     @Override
     public void keepAlive(long keepAlive) {
-    }
-
-    @Override
-    public void lastEmittedDoc(ScoreDoc doc) {
-    }
-
-    @Override
-    public ScoreDoc lastEmittedDoc() {
-        return null;
     }
 
     @Override
@@ -661,4 +658,9 @@ public class TestSearchContext extends SearchContext {
 
     @Override
     public void copyContextAndHeadersFrom(HasContextAndHeaders other) {}
+
+    @Override
+    public Map<Class<?>, Collector> queryCollectors() {
+        return queryCollectors;
+    }
 }

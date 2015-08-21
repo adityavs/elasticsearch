@@ -33,6 +33,7 @@ import org.elasticsearch.cluster.ClusterState;
 import org.elasticsearch.cluster.action.index.MappingUpdatedAction;
 import org.elasticsearch.cluster.action.shard.ShardStateAction;
 import org.elasticsearch.cluster.metadata.IndexMetaData;
+import org.elasticsearch.cluster.metadata.IndexNameExpressionResolver;
 import org.elasticsearch.cluster.metadata.MappingMetaData;
 import org.elasticsearch.cluster.metadata.MetaData;
 import org.elasticsearch.cluster.routing.ShardIterator;
@@ -41,6 +42,7 @@ import org.elasticsearch.common.inject.Inject;
 import org.elasticsearch.common.settings.Settings;
 import org.elasticsearch.index.IndexService;
 import org.elasticsearch.index.engine.Engine;
+import org.elasticsearch.index.engine.EngineClosedException;
 import org.elasticsearch.index.mapper.Mapping;
 import org.elasticsearch.index.mapper.SourceToParse;
 import org.elasticsearch.index.shard.IndexShard;
@@ -72,11 +74,13 @@ public class TransportIndexAction extends TransportReplicationAction<IndexReques
     @Inject
     public TransportIndexAction(Settings settings, TransportService transportService, ClusterService clusterService,
                                 IndicesService indicesService, ThreadPool threadPool, ShardStateAction shardStateAction,
-                                TransportCreateIndexAction createIndexAction, MappingUpdatedAction mappingUpdatedAction, ActionFilters actionFilters) {
+                                TransportCreateIndexAction createIndexAction, MappingUpdatedAction mappingUpdatedAction,
+                                ActionFilters actionFilters, IndexNameExpressionResolver indexNameExpressionResolver,
+                                AutoCreateIndex autoCreateIndex) {
         super(settings, IndexAction.NAME, transportService, clusterService, indicesService, threadPool, shardStateAction, mappingUpdatedAction,
-                actionFilters, IndexRequest.class, IndexRequest.class, ThreadPool.Names.INDEX);
+                actionFilters, indexNameExpressionResolver, IndexRequest.class, IndexRequest.class, ThreadPool.Names.INDEX);
         this.createIndexAction = createIndexAction;
-        this.autoCreateIndex = new AutoCreateIndex(settings);
+        this.autoCreateIndex = autoCreateIndex;
         this.allowIdGeneration = settings.getAsBoolean("action.allow_id_generation", true);
         this.clusterService = clusterService;
     }
@@ -84,7 +88,8 @@ public class TransportIndexAction extends TransportReplicationAction<IndexReques
     @Override
     protected void doExecute(final IndexRequest request, final ActionListener<IndexResponse> listener) {
         // if we don't have a master, we don't have metadata, that's fine, let it find a master using create index API
-        if (autoCreateIndex.shouldAutoCreate(request.index(), clusterService.state())) {
+        ClusterState state = clusterService.state();
+        if (autoCreateIndex.shouldAutoCreate(request.index(), state)) {
             CreateIndexRequest createIndexRequest = new CreateIndexRequest(request);
             createIndexRequest.index(request.index());
             createIndexRequest.mapping(request.type());
@@ -178,7 +183,7 @@ public class TransportIndexAction extends TransportReplicationAction<IndexReques
     protected void shardOperationOnReplica(ShardId shardId, IndexRequest request) {
         IndexService indexService = indicesService.indexServiceSafe(shardId.getIndex());
         IndexShard indexShard = indexService.shardSafe(shardId.id());
-        SourceToParse sourceToParse = SourceToParse.source(SourceToParse.Origin.REPLICA, request.source()).type(request.type()).id(request.id())
+        SourceToParse sourceToParse = SourceToParse.source(SourceToParse.Origin.REPLICA, request.source()).index(shardId.getIndex()).type(request.type()).id(request.id())
                 .routing(request.routing()).parent(request.parent()).timestamp(request.timestamp()).ttl(request.ttl());
 
         final Engine.IndexingOperation operation;

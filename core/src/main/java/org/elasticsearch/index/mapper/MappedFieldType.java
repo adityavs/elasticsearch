@@ -25,14 +25,7 @@ import org.apache.lucene.index.IndexOptions;
 import org.apache.lucene.index.Term;
 import org.apache.lucene.index.Terms;
 import org.apache.lucene.queries.TermsQuery;
-import org.apache.lucene.search.ConstantScoreQuery;
-import org.apache.lucene.search.FuzzyQuery;
-import org.apache.lucene.search.MultiTermQuery;
-import org.apache.lucene.search.PrefixQuery;
-import org.apache.lucene.search.Query;
-import org.apache.lucene.search.RegexpQuery;
-import org.apache.lucene.search.TermQuery;
-import org.apache.lucene.search.TermRangeQuery;
+import org.apache.lucene.search.*;
 import org.apache.lucene.util.BytesRef;
 import org.elasticsearch.action.fieldstats.FieldStats;
 import org.elasticsearch.common.Nullable;
@@ -54,8 +47,6 @@ public abstract class MappedFieldType extends FieldType {
 
     public static class Names {
 
-        private final String shortName;
-
         private final String indexName;
 
         private final String originalIndexName;
@@ -63,21 +54,13 @@ public abstract class MappedFieldType extends FieldType {
         private final String fullName;
 
         public Names(String name) {
-            this(name, name, name, name);
+            this(name, name, name);
         }
 
-        public Names(String shortName, String indexName, String originalIndexName, String fullName) {
-            this.shortName = shortName;
+        public Names(String indexName, String originalIndexName, String fullName) {
             this.indexName = indexName;
             this.originalIndexName = originalIndexName;
             this.fullName = fullName;
-        }
-
-        /**
-         * The logical name of the field.
-         */
-        public String shortName() {
-            return shortName;
         }
 
         /**
@@ -111,15 +94,13 @@ public abstract class MappedFieldType extends FieldType {
             if (!fullName.equals(names.fullName)) return false;
             if (!indexName.equals(names.indexName)) return false;
             if (!originalIndexName.equals(names.originalIndexName)) return false;
-            if (!shortName.equals(names.shortName)) return false;
 
             return true;
         }
 
         @Override
         public int hashCode() {
-            int result = shortName.hashCode();
-            result = 31 * result + indexName.hashCode();
+            int result = indexName.hashCode();
             result = 31 * result + originalIndexName.hashCode();
             result = 31 * result + fullName.hashCode();
             return result;
@@ -201,8 +182,10 @@ public abstract class MappedFieldType extends FieldType {
         setOmitNorms(false);
         setIndexOptions(IndexOptions.DOCS_AND_FREQS_AND_POSITIONS);
         setBoost(1.0f);
+        fieldDataType = new FieldDataType(typeName());
     }
 
+    @Override
     public abstract MappedFieldType clone();
 
     @Override
@@ -291,7 +274,7 @@ public abstract class MappedFieldType extends FieldType {
             conflicts.add("mapper [" + names().fullName() + "] has different analyzer");
         }
 
-        if (!names().equals(other.names())) {
+        if (!names().indexName().equals(other.names().indexName())) {
             conflicts.add("mapper [" + names().fullName() + "] has different index_name");
         }
         if (Objects.equals(similarity(), other.similarity()) == false) {
@@ -466,18 +449,18 @@ public abstract class MappedFieldType extends FieldType {
         return new TermsQuery(names.indexName(), bytesRefs);
     }
 
-    public Query rangeQuery(Object lowerTerm, Object upperTerm, boolean includeLower, boolean includeUpper, @Nullable QueryParseContext context) {
+    public Query rangeQuery(Object lowerTerm, Object upperTerm, boolean includeLower, boolean includeUpper) {
         return new TermRangeQuery(names().indexName(),
             lowerTerm == null ? null : indexedValueForSearch(lowerTerm),
             upperTerm == null ? null : indexedValueForSearch(upperTerm),
             includeLower, includeUpper);
     }
 
-    public Query fuzzyQuery(String value, Fuzziness fuzziness, int prefixLength, int maxExpansions, boolean transpositions) {
-        return new FuzzyQuery(createTerm(value), fuzziness.asDistance(value), prefixLength, maxExpansions, transpositions);
+    public Query fuzzyQuery(Object value, Fuzziness fuzziness, int prefixLength, int maxExpansions, boolean transpositions) {
+        return new FuzzyQuery(createTerm(value), fuzziness.asDistance(BytesRefs.toString(value)), prefixLength, maxExpansions, transpositions);
     }
 
-    public Query prefixQuery(Object value, @Nullable MultiTermQuery.RewriteMethod method, @Nullable QueryParseContext context) {
+    public Query prefixQuery(String value, @Nullable MultiTermQuery.RewriteMethod method, @Nullable QueryParseContext context) {
         PrefixQuery query = new PrefixQuery(createTerm(value));
         if (method != null) {
             query.setRewriteMethod(method);
@@ -485,7 +468,7 @@ public abstract class MappedFieldType extends FieldType {
         return query;
     }
 
-    public Query regexpQuery(Object value, int flags, int maxDeterminizedStates, @Nullable MultiTermQuery.RewriteMethod method, @Nullable QueryParseContext context) {
+    public Query regexpQuery(String value, int flags, int maxDeterminizedStates, @Nullable MultiTermQuery.RewriteMethod method, @Nullable QueryParseContext context) {
         RegexpQuery query = new RegexpQuery(createTerm(value), flags, maxDeterminizedStates);
         if (method != null) {
             query.setRewriteMethod(method);

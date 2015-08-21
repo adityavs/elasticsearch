@@ -19,7 +19,6 @@
 
 package org.elasticsearch.common.io.stream;
 
-import com.vividsolutions.jts.util.Assert;
 import org.apache.lucene.index.CorruptIndexException;
 import org.apache.lucene.index.IndexFormatTooNewException;
 import org.apache.lucene.index.IndexFormatTooOldException;
@@ -31,6 +30,7 @@ import org.elasticsearch.ElasticsearchException;
 import org.elasticsearch.Version;
 import org.elasticsearch.common.Nullable;
 import org.elasticsearch.common.bytes.BytesReference;
+import org.elasticsearch.common.regex.Regex;
 import org.elasticsearch.common.text.Text;
 import org.joda.time.ReadableInstant;
 
@@ -43,6 +43,8 @@ import java.util.Date;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.regex.Matcher;
+import java.util.regex.Pattern;
 
 /**
  *
@@ -368,6 +370,7 @@ public abstract class StreamOutput extends OutputStream {
             } else {
                 writeByte((byte) 10);
             }
+            @SuppressWarnings("unchecked")
             Map<String, Object> map = (Map<String, Object>) value;
             writeVInt(map.size());
             for (Map.Entry<String, Object> entry : map.entrySet()) {
@@ -413,31 +416,31 @@ public abstract class StreamOutput extends OutputStream {
         }
     }
 
-    public void writeIntArray(int[] value) throws IOException {
-        writeVInt(value.length);
-        for (int i=0; i<value.length; i++) {
-            writeInt(value[i]);
+    public void writeIntArray(int[] values) throws IOException {
+        writeVInt(values.length);
+        for (int value : values) {
+            writeInt(value);
         }
     }
 
-    public void writeLongArray(long[] value) throws IOException {
-        writeVInt(value.length);
-        for (int i=0; i<value.length; i++) {
-            writeLong(value[i]);
+    public void writeLongArray(long[] values) throws IOException {
+        writeVInt(values.length);
+        for (long value : values) {
+            writeLong(value);
         }
     }
 
-    public void writeFloatArray(float[] value) throws IOException {
-        writeVInt(value.length);
-        for (int i=0; i<value.length; i++) {
-            writeFloat(value[i]);
+    public void writeFloatArray(float[] values) throws IOException {
+        writeVInt(values.length);
+        for (float value : values) {
+            writeFloat(value);
         }
     }
 
-    public void writeDoubleArray(double[] value) throws IOException {
-        writeVInt(value.length);
-        for (int i=0; i<value.length; i++) {
-            writeDouble(value[i]);
+    public void writeDoubleArray(double[] values) throws IOException {
+        writeVInt(values.length);
+        for (double value : values) {
+            writeDouble(value);
         }
     }
 
@@ -453,19 +456,100 @@ public abstract class StreamOutput extends OutputStream {
         }
     }
 
+    static {
+        assert Version.CURRENT.luceneVersion == org.apache.lucene.util.Version.LUCENE_5_2_1: "Remove these regex once we upgrade to Lucene 5.3 and get proper getters for these expections";
+    }
+    private final static Pattern CORRUPT_INDEX_EXCEPTION_REGEX = Regex.compile("^(.+) \\(resource=(.+)\\)$", "");
+    private final static Pattern INDEX_FORMAT_TOO_NEW_EXCEPTION_REGEX = Regex.compile("Format version is not supported \\(resource (.+)\\): (-?\\d+) \\(needs to be between (-?\\d+) and (-?\\d+)\\)", "");
+    private final static Pattern INDEX_FORMAT_TOO_OLD_EXCEPTION_REGEX_1 = Regex.compile("Format version is not supported \\(resource (.+)\\): (-?\\d+)(?: \\(needs to be between (-?\\d+) and (-?\\d+)\\)). This version of Lucene only supports indexes created with release 4.0 and later\\.", "");
+    private final static Pattern INDEX_FORMAT_TOO_OLD_EXCEPTION_REGEX_2 = Regex.compile("Format version is not supported \\(resource (.+)\\): (.+). This version of Lucene only supports indexes created with release 4.0 and later\\.", "");
+
+    private static int parseIntSafe(String val, int defaultVal) {
+        try {
+            return Integer.parseInt(val);
+        } catch (NumberFormatException ex) {
+            return defaultVal;
+        }
+    }
+
     public void writeThrowable(Throwable throwable) throws IOException {
         if (throwable == null) {
             writeBoolean(false);
         } else {
             writeBoolean(true);
             boolean writeCause = true;
+            boolean writeMessage = true;
             if (throwable instanceof CorruptIndexException) {
                 writeVInt(1);
+                // Lucene 5.3 will have getters for all these
+                // we should switch to using getters instead of trying to parse the message:
+                // writeOptionalString(((CorruptIndexException)throwable).getDescription());
+                // writeOptionalString(((CorruptIndexException)throwable).getResource());
+                Matcher matcher = CORRUPT_INDEX_EXCEPTION_REGEX.matcher(throwable.getMessage());
+                if (matcher.find()) {
+                    writeOptionalString(matcher.group(1)); // message
+                    writeOptionalString(matcher.group(2)); // resource
+                } else {
+                    // didn't match
+                    writeOptionalString("???"); // message
+                    writeOptionalString("???"); // resource
+                }
+                writeMessage = false;
             } else if (throwable instanceof IndexFormatTooNewException) {
                 writeVInt(2);
+                // Lucene 5.3 will have getters for all these
+                // we should switch to using getters instead of trying to parse the message:
+                // writeOptionalString(((CorruptIndexException)throwable).getResource());
+                // writeInt(((IndexFormatTooNewException)throwable).getVersion());
+                // writeInt(((IndexFormatTooNewException)throwable).getMinVersion());
+                // writeInt(((IndexFormatTooNewException)throwable).getMaxVersion());
+                Matcher matcher = INDEX_FORMAT_TOO_NEW_EXCEPTION_REGEX.matcher(throwable.getMessage());
+                if (matcher.find()) {
+                    writeOptionalString(matcher.group(1)); // resource
+                    writeInt(parseIntSafe(matcher.group(2), -1)); // version
+                    writeInt(parseIntSafe(matcher.group(3), -1)); // min version
+                    writeInt(parseIntSafe(matcher.group(4), -1)); // max version
+                } else {
+                    // didn't match
+                    writeOptionalString("???"); // resource
+                    writeInt(-1); // version
+                    writeInt(-1); // min version
+                    writeInt(-1); // max version
+                }
+                writeMessage = false;
                 writeCause = false;
             } else if (throwable instanceof IndexFormatTooOldException) {
                 writeVInt(3);
+                // Lucene 5.3 will have getters for all these
+                // we should switch to using getters instead of trying to parse the message:
+                // writeOptionalString(((CorruptIndexException)throwable).getResource());
+                // writeInt(((IndexFormatTooNewException)throwable).getVersion());
+                // writeInt(((IndexFormatTooNewException)throwable).getMinVersion());
+                // writeInt(((IndexFormatTooNewException)throwable).getMaxVersion());
+                Matcher matcher = INDEX_FORMAT_TOO_OLD_EXCEPTION_REGEX_1.matcher(throwable.getMessage());
+                if (matcher.find()) {
+                    // version with numeric version in constructor
+                    writeOptionalString(matcher.group(1)); // resource
+                    writeBoolean(true);
+                    writeInt(parseIntSafe(matcher.group(2), -1)); // version
+                    writeInt(parseIntSafe(matcher.group(3), -1)); // min version
+                    writeInt(parseIntSafe(matcher.group(4), -1)); // max version
+                } else {
+                    matcher = INDEX_FORMAT_TOO_OLD_EXCEPTION_REGEX_2.matcher(throwable.getMessage());
+                    if (matcher.matches()) {
+                        writeOptionalString(matcher.group(1)); // resource
+                        writeBoolean(false);
+                        writeOptionalString(matcher.group(2)); // version
+                    } else {
+                        // didn't match
+                        writeOptionalString("???"); // resource
+                        writeBoolean(true);
+                        writeInt(-1); // version
+                        writeInt(-1); // min version
+                        writeInt(-1); // max version
+                    }
+                }
+                writeMessage = false;
                 writeCause = false;
             } else if (throwable instanceof NullPointerException) {
                 writeVInt(4);
@@ -475,7 +559,7 @@ public abstract class StreamOutput extends OutputStream {
                 writeCause = false;
             } else if (throwable instanceof IllegalArgumentException) {
                 writeVInt(6);
-            } else if (throwable instanceof IllegalStateException) {
+            } else if (throwable instanceof AlreadyClosedException) {
                 writeVInt(7);
             } else if (throwable instanceof EOFException) {
                 writeVInt(8);
@@ -502,10 +586,13 @@ public abstract class StreamOutput extends OutputStream {
             } else if (throwable instanceof OutOfMemoryError) {
                 writeVInt(15);
                 writeCause = false;
-            } else if (throwable instanceof AlreadyClosedException) {
+            } else if (throwable instanceof IllegalStateException) {
                 writeVInt(16);
             } else if (throwable instanceof LockObtainFailedException) {
                 writeVInt(17);
+            } else if (throwable instanceof InterruptedException) {
+                writeVInt(18);
+                writeCause = false;
             } else {
                 ElasticsearchException ex;
                 final String name = throwable.getClass().getName();
@@ -520,11 +607,21 @@ public abstract class StreamOutput extends OutputStream {
                 return;
 
             }
-            writeOptionalString(throwable.getMessage());
+            if (writeMessage) {
+                writeOptionalString(throwable.getMessage());
+            }
             if (writeCause) {
                 writeThrowable(throwable.getCause());
             }
             ElasticsearchException.writeStackTraces(throwable, this);
         }
+    }
+
+    /**
+     * Writes a {@link NamedWriteable} to the current stream, by first writing its name and then the object itself
+     */
+    void writeNamedWriteable(NamedWriteable namedWriteable) throws IOException {
+        writeString(namedWriteable.getWriteableName());
+        namedWriteable.writeTo(this);
     }
 }

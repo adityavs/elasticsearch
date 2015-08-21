@@ -81,23 +81,23 @@ public class MoveAllocationCommand implements AllocationCommand {
                     } else if ("to_node".equals(currentFieldName) || "toNode".equals(currentFieldName)) {
                         toNode = parser.text();
                     } else {
-                        throw new ElasticsearchParseException("[move] command does not support field [" + currentFieldName + "]");
+                        throw new ElasticsearchParseException("[{}] command does not support field [{}]", NAME, currentFieldName);
                     }
                 } else {
-                    throw new ElasticsearchParseException("[move] command does not support complex json tokens [" + token + "]");
+                    throw new ElasticsearchParseException("[{}] command does not support complex json tokens [{}]", NAME, token);
                 }
             }
             if (index == null) {
-                throw new ElasticsearchParseException("[move] command missing the index parameter");
+                throw new ElasticsearchParseException("[{}] command missing the index parameter", NAME);
             }
             if (shardId == -1) {
-                throw new ElasticsearchParseException("[move] command missing the shard parameter");
+                throw new ElasticsearchParseException("[{}] command missing the shard parameter", NAME);
             }
             if (fromNode == null) {
-                throw new ElasticsearchParseException("[move] command missing the from_node parameter");
+                throw new ElasticsearchParseException("[{}] command missing the from_node parameter", NAME);
             }
             if (toNode == null) {
-                throw new ElasticsearchParseException("[move] command missing the to_node parameter");
+                throw new ElasticsearchParseException("[{}] command missing the to_node parameter", NAME);
             }
             return new MoveAllocationCommand(new ShardId(index, shardId), fromNode, toNode);
         }
@@ -178,12 +178,7 @@ public class MoveAllocationCommand implements AllocationCommand {
             if (decision.type() == Decision.Type.THROTTLE) {
                 // its being throttled, maybe have a flag to take it into account and fail? for now, just do it since the "user" wants it...
             }
-
-            allocation.routingNodes().assign(new ShardRouting(shardRouting.index(), shardRouting.id(),
-                    toRoutingNode.nodeId(), shardRouting.currentNodeId(), shardRouting.restoreSource(),
-                    shardRouting.primary(), ShardRoutingState.INITIALIZING, shardRouting.version() + 1), toRoutingNode.nodeId());
-
-            allocation.routingNodes().relocate(shardRouting, toRoutingNode.nodeId());
+            allocation.routingNodes().relocate(shardRouting, toRoutingNode.nodeId(), allocation.clusterInfo().getShardSize(shardRouting, ShardRouting.UNAVAILABLE_EXPECTED_SHARD_SIZE));
         }
 
         if (!found) {

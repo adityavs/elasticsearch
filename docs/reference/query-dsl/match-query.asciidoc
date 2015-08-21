@@ -1,8 +1,9 @@
 [[query-dsl-match-query]]
 === Match Query
 
-A family of `match` queries that accept text/numerics/dates, analyzes
-it, and constructs a query out of it. For example:
+
+A family of `match` queries that accepts text/numerics/dates, analyzes
+them, and constructs a query. For example:
 
 [source,js]
 --------------------------------------------------
@@ -45,7 +46,7 @@ See <<fuzziness>> for allowed settings.
 
 The `prefix_length` and
 `max_expansions` can be set in this case to control the fuzzy process.
-If the fuzzy option is set the query will use `constant_score_rewrite`
+If the fuzzy option is set the query will use `top_terms_blended_freqs_${max_expansions}`
 as its <<query-dsl-multi-term-rewrite,rewrite
 method>> the `fuzzy_rewrite` parameter allows to control how the query will get
 rewritten.
@@ -160,7 +161,7 @@ A phrase query matches terms up to a configurable `slop`
 (which defaults to 0) in any order. Transposed terms have a slop of 2.
 
 The `analyzer` can be set to control which analyzer will perform the
-analysis process on the text. It default to the field explicit mapping
+analysis process on the text. It defaults to the field explicit mapping
 definition, or the default search analyzer, for example:
 
 [source,js]

@@ -32,20 +32,20 @@ import org.elasticsearch.index.mapper.SourceToParse;
 import org.elasticsearch.index.mapper.Uid;
 import org.elasticsearch.index.mapper.internal.IdFieldMapper;
 import org.elasticsearch.index.mapper.internal.UidFieldMapper;
-import org.elasticsearch.test.ElasticsearchSingleNodeTest;
+import org.elasticsearch.test.ESSingleNodeTestCase;
 
 import static org.hamcrest.Matchers.equalTo;
 import static org.hamcrest.Matchers.notNullValue;
 import static org.hamcrest.Matchers.nullValue;
 
-public class IdMappingTests extends ElasticsearchSingleNodeTest {
+public class IdMappingTests extends ESSingleNodeTestCase {
     
     public void testId() throws Exception {
         String mapping = XContentFactory.jsonBuilder().startObject().startObject("type")
                 .endObject().endObject().string();
         DocumentMapper docMapper = createIndex("test").mapperService().documentMapperParser().parse(mapping);
 
-        ParsedDocument doc = docMapper.parse("type", "1", XContentFactory.jsonBuilder()
+        ParsedDocument doc = docMapper.parse("test", "type", "1", XContentFactory.jsonBuilder()
                 .startObject()
                 .endObject()
                 .bytes());
@@ -54,7 +54,7 @@ public class IdMappingTests extends ElasticsearchSingleNodeTest {
         assertThat(doc.rootDoc().get(IdFieldMapper.NAME), nullValue());
 
         try {
-            docMapper.parse("type", null, XContentFactory.jsonBuilder()
+            docMapper.parse("test", "type", null, XContentFactory.jsonBuilder()
                     .startObject()
                     .endObject()
                     .bytes());
@@ -71,7 +71,7 @@ public class IdMappingTests extends ElasticsearchSingleNodeTest {
         Settings indexSettings = Settings.builder().put(IndexMetaData.SETTING_VERSION_CREATED, Version.V_1_4_2.id).build();
         DocumentMapper docMapper = createIndex("test", indexSettings).mapperService().documentMapperParser().parse(mapping);
 
-        ParsedDocument doc = docMapper.parse("type", "1", XContentFactory.jsonBuilder()
+        ParsedDocument doc = docMapper.parse("test", "type", "1", XContentFactory.jsonBuilder()
                 .startObject()
                 .endObject()
                 .bytes());

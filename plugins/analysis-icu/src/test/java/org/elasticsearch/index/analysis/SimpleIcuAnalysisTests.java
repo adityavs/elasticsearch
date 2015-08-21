@@ -20,7 +20,7 @@
 package org.elasticsearch.index.analysis;
 
 import org.elasticsearch.common.settings.Settings;
-import org.elasticsearch.test.ElasticsearchTestCase;
+import org.elasticsearch.test.ESTestCase;
 import org.junit.Test;
 
 import static org.elasticsearch.common.settings.Settings.settingsBuilder;
@@ -28,13 +28,12 @@ import static org.elasticsearch.index.analysis.AnalysisTestUtils.createAnalysisS
 import static org.hamcrest.Matchers.instanceOf;
 /**
  */
-public class SimpleIcuAnalysisTests extends ElasticsearchTestCase {
+public class SimpleIcuAnalysisTests extends ESTestCase {
 
     @Test
     public void testDefaultsIcuAnalysis() {
         Settings settings = settingsBuilder()
-                .put("path.home", createTempDir())
-                .loadFromClasspath("org/elasticsearch/index/analysis/phonetic-1.yml").build();
+                .put("path.home", createTempDir()).build();
         AnalysisService analysisService = createAnalysisService(settings);
 
         TokenizerFactory tokenizerFactory = analysisService.tokenizer("icu_tokenizer");

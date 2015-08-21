@@ -20,7 +20,7 @@
 package org.elasticsearch.common.settings.loader;
 
 import org.elasticsearch.common.settings.Settings;
-import org.elasticsearch.test.ElasticsearchTestCase;
+import org.elasticsearch.test.ESTestCase;
 import org.junit.Test;
 
 import static org.elasticsearch.common.settings.Settings.settingsBuilder;
@@ -30,12 +30,13 @@ import static org.hamcrest.Matchers.equalTo;
 /**
  *
  */
-public class JsonSettingsLoaderTests extends ElasticsearchTestCase {
+public class JsonSettingsLoaderTests extends ESTestCase {
 
     @Test
     public void testSimpleJsonSettings() throws Exception {
+        String json = "/org/elasticsearch/common/settings/loader/test-settings.json";
         Settings settings = settingsBuilder()
-                .loadFromClasspath("org/elasticsearch/common/settings/loader/test-settings.json")
+                .loadFromStream(json, getClass().getResourceAsStream(json))
                 .build();
 
         assertThat(settings.get("test1.value1"), equalTo("value1"));

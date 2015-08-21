@@ -41,7 +41,6 @@ import org.elasticsearch.node.settings.NodeSettingsService;
 
 import java.util.*;
 
-import static org.elasticsearch.cluster.routing.ShardRoutingState.INITIALIZING;
 import static org.elasticsearch.cluster.routing.ShardRoutingState.RELOCATING;
 
 /**
@@ -292,7 +291,7 @@ public class BalancedShardsAllocator extends AbstractComponent implements Shards
             }
             indices.addAll(allocation.routingTable().indicesRouting().keySet());
             buildModelFromAssigned(routing.shards(assignedFilter));
-            return allocateUnassigned(unassigned, routing.ignoredUnassigned());
+            return allocateUnassigned(unassigned);
         }
 
         private static float absDelta(float lower, float higher) {
@@ -508,11 +507,8 @@ public class BalancedShardsAllocator extends AbstractComponent implements Shards
                     Decision decision = allocation.deciders().canAllocate(shard, target, allocation);
                     if (decision.type() == Type.YES) { // TODO maybe we can respect throttling here too?
                         sourceNode.removeShard(shard);
-                        final ShardRouting initializingShard = new ShardRouting(shard.index(), shard.id(), currentNode.getNodeId(),
-                                shard.currentNodeId(), shard.restoreSource(), shard.primary(), INITIALIZING, shard.version() + 1);
-                        currentNode.addShard(initializingShard, decision);
-                        routingNodes.assign(initializingShard, target.nodeId());
-                        routingNodes.relocate(shard, target.nodeId()); // set the node to relocate after we added the initializing shard
+                        ShardRouting targetRelocatingShard = routingNodes.relocate(shard, target.nodeId(), allocation.clusterInfo().getShardSize(shard, ShardRouting.UNAVAILABLE_EXPECTED_SHARD_SIZE));
+                        currentNode.addShard(targetRelocatingShard, decision);
                         if (logger.isTraceEnabled()) {
                             logger.trace("Moved shard [{}] to node [{}]", shard, currentNode.getNodeId());
                         }
@@ -554,7 +550,7 @@ public class BalancedShardsAllocator extends AbstractComponent implements Shards
          * Allocates all given shards on the minimal eligable node for the shards index
          * with respect to the weight function. All given shards must be unassigned.
          */
-        private boolean allocateUnassigned(RoutingNodes.UnassignedShards unassigned, List<ShardRouting> ignoredUnassigned) {
+        private boolean allocateUnassigned(RoutingNodes.UnassignedShards unassigned) {
             assert !nodes.isEmpty();
             if (logger.isTraceEnabled()) {
                 logger.trace("Start allocating unassigned shards");
@@ -603,9 +599,9 @@ public class BalancedShardsAllocator extends AbstractComponent implements Shards
                     if (!shard.primary()) {
                         boolean drop = deciders.canAllocate(shard, allocation).type() == Type.NO;
                         if (drop) {
-                            ignoredUnassigned.add(shard);
+                            unassigned.ignoreShard(shard);
                             while(i < primaryLength-1 && comparator.compare(primary[i], primary[i+1]) == 0) {
-                                ignoredUnassigned.add(primary[++i]);
+                                unassigned.ignoreShard(primary[++i]);
                             }
                             continue;
                         } else {
@@ -691,7 +687,7 @@ public class BalancedShardsAllocator extends AbstractComponent implements Shards
                             if (logger.isTraceEnabled()) {
                                 logger.trace("Assigned shard [{}] to [{}]", shard, minNode.getNodeId());
                             }
-                            routingNodes.assign(shard, routingNodes.node(minNode.getNodeId()).nodeId());
+                            routingNodes.initialize(shard, routingNodes.node(minNode.getNodeId()).nodeId(), allocation.clusterInfo().getShardSize(shard, ShardRouting.UNAVAILABLE_EXPECTED_SHARD_SIZE));
                             changed = true;
                             continue; // don't add to ignoreUnassigned
                         } else {
@@ -709,10 +705,10 @@ public class BalancedShardsAllocator extends AbstractComponent implements Shards
                     } else if (logger.isTraceEnabled()) {
                         logger.trace("No Node found to assign shard [{}]", shard);
                     }
-                    ignoredUnassigned.add(shard);
+                    unassigned.ignoreShard(shard);
                     if (!shard.primary()) { // we could not allocate it and we are a replica - check if we can ignore the other replicas
                         while(secondaryLength > 0 && comparator.compare(shard, secondary[secondaryLength-1]) == 0) {
-                            ignoredUnassigned.add(secondary[--secondaryLength]);
+                            unassigned.ignoreShard(secondary[--secondaryLength]);
                         }
                     }
                 }
@@ -783,13 +779,10 @@ public class BalancedShardsAllocator extends AbstractComponent implements Shards
                         /* now allocate on the cluster - if we are started we need to relocate the shard */
                         if (candidate.started()) {
                             RoutingNode lowRoutingNode = routingNodes.node(minNode.getNodeId());
-                            routingNodes.assign(new ShardRouting(candidate.index(), candidate.id(), lowRoutingNode.nodeId(), candidate
-                                    .currentNodeId(), candidate.restoreSource(), candidate.primary(), INITIALIZING, candidate.version() + 1), lowRoutingNode.nodeId());
-                            routingNodes.relocate(candidate, lowRoutingNode.nodeId());
+                            routingNodes.relocate(candidate, lowRoutingNode.nodeId(), allocation.clusterInfo().getShardSize(candidate, ShardRouting.UNAVAILABLE_EXPECTED_SHARD_SIZE));
 
                         } else {
-                            assert candidate.unassigned();
-                            routingNodes.assign(candidate, routingNodes.node(minNode.getNodeId()).nodeId());
+                            routingNodes.initialize(candidate, routingNodes.node(minNode.getNodeId()).nodeId(), allocation.clusterInfo().getShardSize(candidate, ShardRouting.UNAVAILABLE_EXPECTED_SHARD_SIZE));
                         }
                         return true;
 

@@ -29,11 +29,11 @@ import org.elasticsearch.common.xcontent.XContentBuilder;
 import org.elasticsearch.http.HttpStats;
 import org.elasticsearch.indices.NodeIndicesStats;
 import org.elasticsearch.indices.breaker.AllCircuitBreakerStats;
-import org.elasticsearch.monitor.fs.FsStats;
+import org.elasticsearch.monitor.fs.FsInfo;
 import org.elasticsearch.monitor.jvm.JvmStats;
-import org.elasticsearch.monitor.network.NetworkStats;
 import org.elasticsearch.monitor.os.OsStats;
 import org.elasticsearch.monitor.process.ProcessStats;
+import org.elasticsearch.script.ScriptStats;
 import org.elasticsearch.threadpool.ThreadPoolStats;
 import org.elasticsearch.transport.TransportStats;
 
@@ -63,10 +63,7 @@ public class NodeStats extends BaseNodeResponse implements ToXContent {
     private ThreadPoolStats threadPool;
 
     @Nullable
-    private NetworkStats network;
-
-    @Nullable
-    private FsStats fs;
+    private FsInfo fs;
 
     @Nullable
     private TransportStats transport;
@@ -77,13 +74,17 @@ public class NodeStats extends BaseNodeResponse implements ToXContent {
     @Nullable
     private AllCircuitBreakerStats breaker;
 
+    @Nullable
+    private ScriptStats scriptStats;
+
     NodeStats() {
     }
 
     public NodeStats(DiscoveryNode node, long timestamp, @Nullable NodeIndicesStats indices,
                      @Nullable OsStats os, @Nullable ProcessStats process, @Nullable JvmStats jvm, @Nullable ThreadPoolStats threadPool,
-                     @Nullable NetworkStats network, @Nullable FsStats fs, @Nullable TransportStats transport, @Nullable HttpStats http,
-                     @Nullable AllCircuitBreakerStats breaker) {
+                     @Nullable FsInfo fs, @Nullable TransportStats transport, @Nullable HttpStats http,
+                     @Nullable AllCircuitBreakerStats breaker,
+                     @Nullable ScriptStats scriptStats) {
         super(node);
         this.timestamp = timestamp;
         this.indices = indices;
@@ -91,11 +92,11 @@ public class NodeStats extends BaseNodeResponse implements ToXContent {
         this.process = process;
         this.jvm = jvm;
         this.threadPool = threadPool;
-        this.network = network;
         this.fs = fs;
         this.transport = transport;
         this.http = http;
         this.breaker = breaker;
+        this.scriptStats = scriptStats;
     }
 
     public long getTimestamp() {
@@ -148,18 +149,10 @@ public class NodeStats extends BaseNodeResponse implements ToXContent {
     }
 
     /**
-     * Network level statistics.
-     */
-    @Nullable
-    public NetworkStats getNetwork() {
-        return network;
-    }
-
-    /**
      * File system level stats.
      */
     @Nullable
-    public FsStats getFs() {
+    public FsInfo getFs() {
         return fs;
     }
 
@@ -176,6 +169,11 @@ public class NodeStats extends BaseNodeResponse implements ToXContent {
     @Nullable
     public AllCircuitBreakerStats getBreaker() {
         return this.breaker;
+    }
+
+    @Nullable
+    public ScriptStats getScriptStats() {
+        return this.scriptStats;
     }
 
     public static NodeStats readNodeStats(StreamInput in) throws IOException {
@@ -204,10 +202,7 @@ public class NodeStats extends BaseNodeResponse implements ToXContent {
             threadPool = ThreadPoolStats.readThreadPoolStats(in);
         }
         if (in.readBoolean()) {
-            network = NetworkStats.readNetworkStats(in);
-        }
-        if (in.readBoolean()) {
-            fs = FsStats.readFsStats(in);
+            fs = FsInfo.readFsInfo(in);
         }
         if (in.readBoolean()) {
             transport = TransportStats.readTransportStats(in);
@@ -216,6 +211,7 @@ public class NodeStats extends BaseNodeResponse implements ToXContent {
             http = HttpStats.readHttpStats(in);
         }
         breaker = AllCircuitBreakerStats.readOptionalAllCircuitBreakerStats(in);
+        scriptStats = in.readOptionalStreamable(new ScriptStats());
 
     }
 
@@ -253,12 +249,6 @@ public class NodeStats extends BaseNodeResponse implements ToXContent {
             out.writeBoolean(true);
             threadPool.writeTo(out);
         }
-        if (network == null) {
-            out.writeBoolean(false);
-        } else {
-            out.writeBoolean(true);
-            network.writeTo(out);
-        }
         if (fs == null) {
             out.writeBoolean(false);
         } else {
@@ -278,6 +268,7 @@ public class NodeStats extends BaseNodeResponse implements ToXContent {
             http.writeTo(out);
         }
         out.writeOptionalStreamable(breaker);
+        out.writeOptionalStreamable(scriptStats);
     }
 
     @Override
@@ -313,9 +304,6 @@ public class NodeStats extends BaseNodeResponse implements ToXContent {
         if (getThreadPool() != null) {
             getThreadPool().toXContent(builder, params);
         }
-        if (getNetwork() != null) {
-            getNetwork().toXContent(builder, params);
-        }
         if (getFs() != null) {
             getFs().toXContent(builder, params);
         }
@@ -327,6 +315,9 @@ public class NodeStats extends BaseNodeResponse implements ToXContent {
         }
         if (getBreaker() != null) {
             getBreaker().toXContent(builder, params);
+        }
+        if (getScriptStats() != null) {
+            getScriptStats().toXContent(builder, params);
         }
 
         return builder;

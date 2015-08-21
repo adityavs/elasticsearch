@@ -26,12 +26,14 @@ import org.elasticsearch.cluster.ClusterName;
 import org.elasticsearch.cluster.node.DiscoveryNode;
 import org.elasticsearch.common.settings.Settings;
 import org.elasticsearch.common.transport.LocalTransportAddress;
-import org.elasticsearch.test.ElasticsearchTestCase;
+import org.elasticsearch.test.ESTestCase;
 import org.elasticsearch.threadpool.ThreadPool;
 import org.elasticsearch.transport.*;
 import org.junit.Test;
 
 import java.io.Closeable;
+import java.util.Collections;
+import java.util.List;
 import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicInteger;
@@ -41,7 +43,7 @@ import static org.hamcrest.CoreMatchers.*;
 import static org.hamcrest.Matchers.lessThanOrEqualTo;
 import static org.hamcrest.Matchers.notNullValue;
 
-public class TransportClientNodesServiceTests extends ElasticsearchTestCase {
+public class TransportClientNodesServiceTests extends ESTestCase {
 
     private static class TestIteration implements Closeable {
         private final ThreadPool threadPool;
@@ -53,6 +55,11 @@ public class TransportClientNodesServiceTests extends ElasticsearchTestCase {
         TestIteration() {
             threadPool = new ThreadPool("transport-client-nodes-service-tests");
             transport = new FailAndRetryMockTransport<TestResponse>(getRandom()) {
+                @Override
+                public List<String> getLocalAddresses() {
+                    return Collections.EMPTY_LIST;
+                }
+
                 @Override
                 protected TestResponse newResponse() {
                     return  new TestResponse();
@@ -118,7 +125,7 @@ public class TransportClientNodesServiceTests extends ElasticsearchTestCase {
                             throw new IllegalArgumentException();
                         }
 
-                        iteration.transportService.sendRequest(node, "action", new TestRequest(), new TransportRequestOptions().withTimeout(50), new BaseTransportResponseHandler<TestResponse>() {
+                        iteration.transportService.sendRequest(node, "action", new TestRequest(), new TransportRequestOptions(), new BaseTransportResponseHandler<TestResponse>() {
                             @Override
                             public TestResponse newInstance() {
                                 return new TestResponse();

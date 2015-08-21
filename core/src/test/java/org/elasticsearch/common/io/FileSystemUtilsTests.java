@@ -21,7 +21,7 @@ package org.elasticsearch.common.io;
 
 import com.google.common.base.Charsets;
 
-import org.elasticsearch.test.ElasticsearchTestCase;
+import org.elasticsearch.test.ESTestCase;
 import org.apache.lucene.util.LuceneTestCase.SuppressFileSystems;
 import org.junit.Assert;
 import org.junit.Before;
@@ -32,6 +32,7 @@ import java.net.URISyntaxException;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.Path;
+import java.util.Arrays;
 
 import static org.elasticsearch.test.hamcrest.ElasticsearchAssertions.assertFileExists;
 import static org.elasticsearch.test.hamcrest.ElasticsearchAssertions.assertFileNotExists;
@@ -42,7 +43,7 @@ import static org.hamcrest.CoreMatchers.is;
  * Unit tests for {@link org.elasticsearch.common.io.FileSystemUtils}.
  */
 @SuppressFileSystems("WindowsFS") // tries to move away open file handles
-public class FileSystemUtilsTests extends ElasticsearchTestCase {
+public class FileSystemUtilsTests extends ESTestCase {
 
     private Path src;
     private Path dst;
@@ -172,5 +173,40 @@ public class FileSystemUtilsTests extends ElasticsearchTestCase {
 
         assertEquals(FileSystemUtils.append(PathUtils.get("/foo/bar"), PathUtils.get("/hello/world/this_is/awesome"), 1),
                 PathUtils.get("/foo/bar/world/this_is/awesome"));
+    }
+
+    public void testIsHidden() {
+        for (String p : Arrays.asList(
+                "/",
+                "foo",
+                "/foo",
+                "foo.bar",
+                "/foo.bar",
+                "foo/bar",
+                "foo/./bar",
+                "foo/../bar",
+                "/foo/./bar",
+                "/foo/../bar"
+                )) {
+            Path path = PathUtils.get(p);
+            assertFalse(FileSystemUtils.isHidden(path));
+        }
+        for (String p : Arrays.asList(
+                ".hidden",
+                ".hidden.ext",
+                "/.hidden",
+                "/.hidden.ext",
+                "foo/.hidden",
+                "foo/.hidden.ext",
+                "/foo/.hidden",
+                "/foo/.hidden.ext",
+                ".",
+                "..",
+                "foo/.",
+                "foo/.."
+                )) {
+            Path path = PathUtils.get(p);
+            assertTrue(FileSystemUtils.isHidden(path));
+        }
     }
 }

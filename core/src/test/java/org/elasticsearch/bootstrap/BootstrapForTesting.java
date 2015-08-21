@@ -25,8 +25,11 @@ import org.elasticsearch.bootstrap.ESPolicy;
 import org.elasticsearch.bootstrap.Security;
 import org.elasticsearch.common.Strings;
 import org.elasticsearch.common.io.PathUtils;
+import org.elasticsearch.common.logging.Loggers;
 
 import java.io.FilePermission;
+import java.net.URL;
+import java.net.URLClassLoader;
 import java.nio.file.Path;
 import java.security.Permissions;
 import java.security.Policy;
@@ -49,13 +52,22 @@ public class BootstrapForTesting {
 
     static {
         // just like bootstrap, initialize natives, then SM
-        Bootstrap.initializeNatives(true, true, true);
+        Bootstrap.initializeNatives(true, true);
+
+        // initialize probes
+        Bootstrap.initializeProbes();
         
         // check for jar hell
         try {
             JarHell.checkJarHell();
         } catch (Exception e) {
-            throw new RuntimeException("found jar hell in test classpath", e);
+            if (Boolean.parseBoolean(System.getProperty("tests.maven"))) {
+                throw new RuntimeException("found jar hell in test classpath", e);
+            } else {
+                Loggers.getLogger(BootstrapForTesting.class)
+                    .warn("Your ide or custom test runner has jar hell issues, " +
+                          "you might want to look into that", e);
+            }
         }
 
         // make sure java.io.tmpdir exists always (in case code uses it in a static initializer)
@@ -73,17 +85,21 @@ public class BootstrapForTesting {
                 Security.setCodebaseProperties();
                 // initialize paths the same exact way as bootstrap.
                 Permissions perms = new Permissions();
-                Path basedir = PathUtils.get(Objects.requireNonNull(System.getProperty("project.basedir"), 
-                                                                    "please set ${project.basedir} in pom.xml"));
-                // target/classes, target/test-classes
-                Security.addPath(perms, basedir.resolve("target").resolve("classes"), "read,readlink");
-                Security.addPath(perms, basedir.resolve("target").resolve("test-classes"), "read,readlink");
-                // lib/sigar
-                Security.addPath(perms, basedir.resolve("lib").resolve("sigar"), "read,readlink");
-                // .m2/repository
-                Path m2repoDir = PathUtils.get(Objects.requireNonNull(System.getProperty("m2.repository"), 
-                                                                     "please set ${m2.repository} in pom.xml"));
-                Security.addPath(perms, m2repoDir, "read,readlink");
+                // add permissions to everything in classpath
+                for (URL url : ((URLClassLoader)BootstrapForTesting.class.getClassLoader()).getURLs()) {
+                    Path path = PathUtils.get(url.toURI());
+                    // resource itself
+                    perms.add(new FilePermission(path.toString(), "read,readlink"));
+                    // classes underneath
+                    perms.add(new FilePermission(path.toString() + path.getFileSystem().getSeparator() + "-", "read,readlink"));
+
+                    // crazy jython...
+                    String filename = path.getFileName().toString();
+                    if (filename.contains("jython") && filename.endsWith(".jar")) {
+                        // just enough so it won't fail when it does not exist
+                        perms.add(new FilePermission(path.getParent().resolve("Lib").toString(), "read,readlink"));
+                    }
+                }
                 // java.io.tmpdir
                 Security.addPath(perms, javaTmpDir, "read,readlink,write,delete");
                 // custom test config file

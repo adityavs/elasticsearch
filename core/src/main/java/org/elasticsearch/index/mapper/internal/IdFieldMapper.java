@@ -46,10 +46,9 @@ import org.elasticsearch.index.mapper.Mapper;
 import org.elasticsearch.index.mapper.MapperParsingException;
 import org.elasticsearch.index.mapper.MergeMappingException;
 import org.elasticsearch.index.mapper.MergeResult;
+import org.elasticsearch.index.mapper.MetadataFieldMapper;
 import org.elasticsearch.index.mapper.ParseContext;
-import org.elasticsearch.index.mapper.RootMapper;
 import org.elasticsearch.index.mapper.Uid;
-import org.elasticsearch.index.mapper.core.AbstractFieldMapper;
 import org.elasticsearch.index.query.QueryParseContext;
 
 import java.io.IOException;
@@ -63,13 +62,13 @@ import static org.elasticsearch.index.mapper.core.TypeParsers.parseField;
 /**
  * 
  */
-public class IdFieldMapper extends AbstractFieldMapper implements RootMapper {
+public class IdFieldMapper extends MetadataFieldMapper {
 
     public static final String NAME = "_id";
 
     public static final String CONTENT_TYPE = "_id";
 
-    public static class Defaults extends AbstractFieldMapper.Defaults {
+    public static class Defaults {
         public static final String NAME = IdFieldMapper.NAME;
 
         public static final MappedFieldType FIELD_TYPE = new IdFieldType();
@@ -87,7 +86,7 @@ public class IdFieldMapper extends AbstractFieldMapper implements RootMapper {
         public static final String PATH = null;
     }
 
-    public static class Builder extends AbstractFieldMapper.Builder<Builder, IdFieldMapper> {
+    public static class Builder extends MetadataFieldMapper.Builder<Builder, IdFieldMapper> {
 
         private String path = Defaults.PATH;
 
@@ -108,15 +107,15 @@ public class IdFieldMapper extends AbstractFieldMapper implements RootMapper {
 
         @Override
         public IdFieldMapper build(BuilderContext context) {
-            fieldType.setNames(new MappedFieldType.Names(name, indexName, indexName, name));
-            return new IdFieldMapper(fieldType, docValues, path, fieldDataSettings, context.indexSettings());
+            setupFieldType(context);
+            return new IdFieldMapper(fieldType, path, context.indexSettings());
         }
     }
 
     public static class TypeParser implements Mapper.TypeParser {
         @Override
         public Mapper.Builder parse(String name, Map<String, Object> node, ParserContext parserContext) throws MapperParsingException {
-            if (parserContext.indexVersionCreated().onOrAfter(Version.V_2_0_0)) {
+            if (parserContext.indexVersionCreated().onOrAfter(Version.V_2_0_0_beta1)) {
                 throw new MapperParsingException(NAME + " is not configurable");
             }
             Builder builder = new Builder(parserContext.mapperService().fullName(NAME));
@@ -136,7 +135,9 @@ public class IdFieldMapper extends AbstractFieldMapper implements RootMapper {
 
     static final class IdFieldType extends MappedFieldType {
 
-        public IdFieldType() {}
+        public IdFieldType() {
+            setFieldDataType(new FieldDataType("string"));
+        }
 
         protected IdFieldType(IdFieldType ref) {
             super(ref);
@@ -183,7 +184,7 @@ public class IdFieldMapper extends AbstractFieldMapper implements RootMapper {
         }
 
         @Override
-        public Query prefixQuery(Object value, @Nullable MultiTermQuery.RewriteMethod method, @Nullable QueryParseContext context) {
+        public Query prefixQuery(String value, @Nullable MultiTermQuery.RewriteMethod method, @Nullable QueryParseContext context) {
             if (indexOptions() != IndexOptions.NONE || context == null) {
                 return super.prefixQuery(value, method, context);
             }
@@ -200,7 +201,7 @@ public class IdFieldMapper extends AbstractFieldMapper implements RootMapper {
         }
 
         @Override
-        public Query regexpQuery(Object value, int flags, int maxDeterminizedStates, @Nullable MultiTermQuery.RewriteMethod method, @Nullable QueryParseContext context) {
+        public Query regexpQuery(String value, int flags, int maxDeterminizedStates, @Nullable MultiTermQuery.RewriteMethod method, @Nullable QueryParseContext context) {
             if (indexOptions() != IndexOptions.NONE || context == null) {
                 return super.regexpQuery(value, flags, maxDeterminizedStates, method, context);
             }
@@ -228,14 +229,11 @@ public class IdFieldMapper extends AbstractFieldMapper implements RootMapper {
     private final String path;
 
     public IdFieldMapper(Settings indexSettings, MappedFieldType existing) {
-        this(idFieldType(indexSettings, existing), null, Defaults.PATH,
-             existing == null ? null : (existing.fieldDataType() == null ? null : existing.fieldDataType().getSettings()),
-             indexSettings);
+        this(idFieldType(indexSettings, existing), Defaults.PATH, indexSettings);
     }
 
-    protected IdFieldMapper(MappedFieldType fieldType, Boolean docValues, String path,
-                            @Nullable Settings fieldDataSettings, Settings indexSettings) {
-        super(fieldType, docValues, fieldDataSettings, indexSettings);
+    protected IdFieldMapper(MappedFieldType fieldType, String path, Settings indexSettings) {
+        super(NAME, fieldType, Defaults.FIELD_TYPE, indexSettings);
         this.path = path;
     }
     
@@ -244,7 +242,7 @@ public class IdFieldMapper extends AbstractFieldMapper implements RootMapper {
             return existing.clone();
         }
         MappedFieldType fieldType = Defaults.FIELD_TYPE.clone();
-        boolean pre2x = Version.indexCreated(indexSettings).before(Version.V_2_0_0);
+        boolean pre2x = Version.indexCreated(indexSettings).before(Version.V_2_0_0_beta1);
         if (pre2x && indexSettings.getAsBoolean("index.mapping._id.indexed", true) == false) {
             fieldType.setTokenized(false);
         }
@@ -253,16 +251,6 @@ public class IdFieldMapper extends AbstractFieldMapper implements RootMapper {
 
     public String path() {
         return this.path;
-    }
-
-    @Override
-    public MappedFieldType defaultFieldType() {
-        return Defaults.FIELD_TYPE;
-    }
-
-    @Override
-    public FieldDataType defaultFieldDataType() {
-        return new FieldDataType("string");
     }
 
     @Override
@@ -331,9 +319,7 @@ public class IdFieldMapper extends AbstractFieldMapper implements RootMapper {
             builder.field("path", path);
         }
 
-        if (hasCustomFieldDataSettings()) {
-            builder.field("fielddata", (Map) customFieldDataSettings.getAsMap());
-        } else if (includeDefaults) {
+        if (includeDefaults || hasCustomFieldDataSettings()) {
             builder.field("fielddata", (Map) fieldType().fieldDataType().getSettings().getAsMap());
         }
         builder.endObject();

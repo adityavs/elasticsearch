@@ -60,7 +60,7 @@ public class NotQueryParser implements QueryParser {
             } else if (parseContext.isDeprecatedSetting(currentFieldName)) {
                 // skip
             } else if (token == XContentParser.Token.START_OBJECT) {
-                if (QUERY_FIELD.match(currentFieldName)) {
+                if (parseContext.parseFieldMatcher().match(currentFieldName, QUERY_FIELD)) {
                     query = parseContext.parseInnerFilter();
                     queryFound = true;
                 } else {
@@ -68,10 +68,6 @@ public class NotQueryParser implements QueryParser {
                     // its the filter, and the name is the field
                     query = parseContext.parseInnerFilter(currentFieldName);
                 }
-            } else if (token == XContentParser.Token.START_ARRAY) {
-                queryFound = true;
-                // its the filter, and the name is the field
-                query = parseContext.parseInnerFilter(currentFieldName);
             } else if (token.isValue()) {
                 if ("_name".equals(currentFieldName)) {
                     queryName = parser.text();

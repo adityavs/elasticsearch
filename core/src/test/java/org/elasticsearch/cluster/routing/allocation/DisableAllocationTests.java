@@ -28,7 +28,7 @@ import org.elasticsearch.cluster.routing.RoutingTable;
 import org.elasticsearch.cluster.routing.allocation.decider.DisableAllocationDecider;
 import org.elasticsearch.common.logging.ESLogger;
 import org.elasticsearch.common.logging.Loggers;
-import org.elasticsearch.test.ElasticsearchAllocationTestCase;
+import org.elasticsearch.test.ESAllocationTestCase;
 import org.junit.Test;
 
 import static org.elasticsearch.cluster.routing.ShardRoutingState.INITIALIZING;
@@ -38,7 +38,7 @@ import static org.hamcrest.Matchers.equalTo;
 
 /**
  */
-public class DisableAllocationTests extends ElasticsearchAllocationTestCase {
+public class DisableAllocationTests extends ESAllocationTestCase {
 
     private final ESLogger logger = Loggers.getLogger(DisableAllocationTests.class);
 
@@ -68,7 +68,7 @@ public class DisableAllocationTests extends ElasticsearchAllocationTestCase {
         ).build();
         routingTable = strategy.reroute(clusterState).routingTable();
         clusterState = ClusterState.builder(clusterState).routingTable(routingTable).build();
-        assertThat(clusterState.routingNodes().shardsWithState(INITIALIZING).size(), equalTo(0));
+        assertThat(clusterState.getRoutingNodes().shardsWithState(INITIALIZING).size(), equalTo(0));
 
     }
 
@@ -97,13 +97,13 @@ public class DisableAllocationTests extends ElasticsearchAllocationTestCase {
         ).build();
         routingTable = strategy.reroute(clusterState).routingTable();
         clusterState = ClusterState.builder(clusterState).routingTable(routingTable).build();
-        assertThat(clusterState.routingNodes().shardsWithState(INITIALIZING).size(), equalTo(1));
+        assertThat(clusterState.getRoutingNodes().shardsWithState(INITIALIZING).size(), equalTo(1));
 
         logger.info("--> start the shards (primaries)");
-        routingTable = strategy.applyStartedShards(clusterState, clusterState.routingNodes().shardsWithState(INITIALIZING)).routingTable();
+        routingTable = strategy.applyStartedShards(clusterState, clusterState.getRoutingNodes().shardsWithState(INITIALIZING)).routingTable();
         clusterState = ClusterState.builder(clusterState).routingTable(routingTable).build();
 
-        assertThat(clusterState.routingNodes().shardsWithState(INITIALIZING).size(), equalTo(0));
+        assertThat(clusterState.getRoutingNodes().shardsWithState(INITIALIZING).size(), equalTo(0));
     }
 
     @Test
@@ -130,17 +130,17 @@ public class DisableAllocationTests extends ElasticsearchAllocationTestCase {
         ).build();
         routingTable = strategy.reroute(clusterState).routingTable();
         clusterState = ClusterState.builder(clusterState).routingTable(routingTable).build();
-        assertThat(clusterState.routingNodes().shardsWithState(INITIALIZING).size(), equalTo(1));
+        assertThat(clusterState.getRoutingNodes().shardsWithState(INITIALIZING).size(), equalTo(1));
         logger.info("--> start the shards (primaries)");
-        routingTable = strategy.applyStartedShards(clusterState, clusterState.routingNodes().shardsWithState(INITIALIZING)).routingTable();
+        routingTable = strategy.applyStartedShards(clusterState, clusterState.getRoutingNodes().shardsWithState(INITIALIZING)).routingTable();
         clusterState = ClusterState.builder(clusterState).routingTable(routingTable).build();
         logger.info("--> start the shards (replicas)");
-        routingTable = strategy.applyStartedShards(clusterState, clusterState.routingNodes().shardsWithState(INITIALIZING)).routingTable();
+        routingTable = strategy.applyStartedShards(clusterState, clusterState.getRoutingNodes().shardsWithState(INITIALIZING)).routingTable();
         clusterState = ClusterState.builder(clusterState).routingTable(routingTable).build();
 
         logger.info("--> verify only enabled index has been routed");
-        assertThat(clusterState.readOnlyRoutingNodes().shardsWithState("enabled", STARTED).size(), equalTo(2));
-        assertThat(clusterState.readOnlyRoutingNodes().shardsWithState("disabled", STARTED).size(), equalTo(0));
+        assertThat(clusterState.getRoutingNodes().shardsWithState("enabled", STARTED).size(), equalTo(2));
+        assertThat(clusterState.getRoutingNodes().shardsWithState("disabled", STARTED).size(), equalTo(0));
     }
 
 }

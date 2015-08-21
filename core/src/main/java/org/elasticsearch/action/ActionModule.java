@@ -21,6 +21,7 @@ package org.elasticsearch.action;
 
 import com.google.common.collect.Lists;
 import com.google.common.collect.Maps;
+
 import org.elasticsearch.action.admin.cluster.health.ClusterHealthAction;
 import org.elasticsearch.action.admin.cluster.health.TransportClusterHealthAction;
 import org.elasticsearch.action.admin.cluster.node.hotthreads.NodesHotThreadsAction;
@@ -95,6 +96,8 @@ import org.elasticsearch.action.admin.indices.recovery.RecoveryAction;
 import org.elasticsearch.action.admin.indices.recovery.TransportRecoveryAction;
 import org.elasticsearch.action.admin.indices.refresh.RefreshAction;
 import org.elasticsearch.action.admin.indices.refresh.TransportRefreshAction;
+import org.elasticsearch.action.admin.indices.shards.IndicesShardStoresAction;
+import org.elasticsearch.action.admin.indices.shards.TransportIndicesShardStoresAction;
 import org.elasticsearch.action.admin.indices.segments.IndicesSegmentsAction;
 import org.elasticsearch.action.admin.indices.segments.TransportIndicesSegmentsAction;
 import org.elasticsearch.action.admin.indices.settings.get.GetSettingsAction;
@@ -117,6 +120,8 @@ import org.elasticsearch.action.admin.indices.upgrade.post.UpgradeAction;
 import org.elasticsearch.action.admin.indices.upgrade.post.UpgradeSettingsAction;
 import org.elasticsearch.action.admin.indices.validate.query.TransportValidateQueryAction;
 import org.elasticsearch.action.admin.indices.validate.query.ValidateQueryAction;
+import org.elasticsearch.action.admin.indices.validate.template.RenderSearchTemplateAction;
+import org.elasticsearch.action.admin.indices.validate.template.TransportRenderSearchTemplateAction;
 import org.elasticsearch.action.admin.indices.warmer.delete.DeleteWarmerAction;
 import org.elasticsearch.action.admin.indices.warmer.delete.TransportDeleteWarmerAction;
 import org.elasticsearch.action.admin.indices.warmer.get.GetWarmersAction;
@@ -150,6 +155,7 @@ import org.elasticsearch.action.suggest.SuggestAction;
 import org.elasticsearch.action.suggest.TransportSuggestAction;
 import org.elasticsearch.action.support.ActionFilter;
 import org.elasticsearch.action.support.ActionFilters;
+import org.elasticsearch.action.support.AutoCreateIndex;
 import org.elasticsearch.action.support.TransportAction;
 import org.elasticsearch.action.termvectors.*;
 import org.elasticsearch.action.termvectors.dfs.TransportDfsOnlyAction;
@@ -216,6 +222,7 @@ public class ActionModule extends AbstractModule {
             actionFilterMultibinder.addBinding().to(actionFilter);
         }
         bind(ActionFilters.class).asEagerSingleton();
+        bind(AutoCreateIndex.class).asEagerSingleton();
         registerAction(NodesInfoAction.INSTANCE, TransportNodesInfoAction.class);
         registerAction(NodesStatsAction.INSTANCE, TransportNodesStatsAction.class);
         registerAction(NodesHotThreadsAction.INSTANCE, TransportNodesHotThreadsAction.class);
@@ -239,6 +246,7 @@ public class ActionModule extends AbstractModule {
 
         registerAction(IndicesStatsAction.INSTANCE, TransportIndicesStatsAction.class);
         registerAction(IndicesSegmentsAction.INSTANCE, TransportIndicesSegmentsAction.class);
+        registerAction(IndicesShardStoresAction.INSTANCE, TransportIndicesShardStoresAction.class);
         registerAction(CreateIndexAction.INSTANCE, TransportCreateIndexAction.class);
         registerAction(DeleteIndexAction.INSTANCE, TransportDeleteIndexAction.class);
         registerAction(GetIndexAction.INSTANCE, TransportGetIndexAction.class);
@@ -302,6 +310,7 @@ public class ActionModule extends AbstractModule {
         registerAction(ExplainAction.INSTANCE, TransportExplainAction.class);
         registerAction(ClearScrollAction.INSTANCE, TransportClearScrollAction.class);
         registerAction(RecoveryAction.INSTANCE, TransportRecoveryAction.class);
+        registerAction(RenderSearchTemplateAction.INSTANCE, TransportRenderSearchTemplateAction.class);
 
         //Indexed scripts
         registerAction(PutIndexedScriptAction.INSTANCE, TransportPutIndexedScriptAction.class);

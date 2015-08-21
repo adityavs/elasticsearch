@@ -22,7 +22,7 @@ package org.elasticsearch.rest.action.cat;
 import org.elasticsearch.action.admin.cluster.node.info.NodeInfo;
 import org.elasticsearch.action.admin.cluster.node.info.NodesInfoRequest;
 import org.elasticsearch.action.admin.cluster.node.info.NodesInfoResponse;
-import org.elasticsearch.action.admin.cluster.node.info.PluginInfo;
+import org.elasticsearch.plugins.PluginInfo;
 import org.elasticsearch.action.admin.cluster.state.ClusterStateRequest;
 import org.elasticsearch.action.admin.cluster.state.ClusterStateResponse;
 import org.elasticsearch.client.Client;
@@ -47,7 +47,7 @@ public class RestPluginsAction extends AbstractCatAction {
     }
 
     @Override
-    void documentation(StringBuilder sb) {
+    protected void documentation(StringBuilder sb) {
         sb.append("/_cat/plugins\n");
     }
 
@@ -74,7 +74,7 @@ public class RestPluginsAction extends AbstractCatAction {
     }
 
     @Override
-    Table getTableWithHeader(final RestRequest request) {
+    protected Table getTableWithHeader(final RestRequest request) {
         Table table = new Table();
         table.startHeaders();
         table.addCell("id", "default:false;desc:unique node id");

@@ -24,7 +24,7 @@ import org.apache.lucene.util.LuceneTestCase;
 import org.elasticsearch.client.Client;
 import org.elasticsearch.cluster.ClusterName;
 import org.elasticsearch.common.settings.Settings;
-import org.elasticsearch.test.ElasticsearchTestCase;
+import org.elasticsearch.test.ESTestCase;
 import org.elasticsearch.test.InternalTestCluster;
 import org.elasticsearch.test.SettingsSource;
 
@@ -42,7 +42,7 @@ import static org.hamcrest.Matchers.hasEntry;
  * configuration given the same seed / input.
  */
 @LuceneTestCase.SuppressFileSystems("ExtrasFS") // doesn't work with potential multi data path from test cluster yet
-public class InternalTestClusterTests extends ElasticsearchTestCase {
+public class InternalTestClusterTests extends ESTestCase {
 
     public void testInitializiationIsConsistent() {
         long clusterSeed = randomLong();
@@ -55,8 +55,8 @@ public class InternalTestClusterTests extends ElasticsearchTestCase {
         String nodePrefix = randomRealisticUnicodeOfCodepointLengthBetween(1, 10);
 
         Path baseDir = createTempDir();
-        InternalTestCluster cluster0 = new InternalTestCluster(clusterSeed, baseDir, minNumDataNodes, maxNumDataNodes, clusterName, settingsSource, numClientNodes, enableHttpPipelining, nodePrefix);
-        InternalTestCluster cluster1 = new InternalTestCluster(clusterSeed, baseDir, minNumDataNodes, maxNumDataNodes, clusterName, settingsSource, numClientNodes, enableHttpPipelining, nodePrefix);
+        InternalTestCluster cluster0 = new InternalTestCluster("local", clusterSeed, baseDir, minNumDataNodes, maxNumDataNodes, clusterName, settingsSource, numClientNodes, enableHttpPipelining, nodePrefix);
+        InternalTestCluster cluster1 = new InternalTestCluster("local", clusterSeed, baseDir, minNumDataNodes, maxNumDataNodes, clusterName, settingsSource, numClientNodes, enableHttpPipelining, nodePrefix);
         assertClusters(cluster0, cluster1, true);
 
     }
@@ -99,8 +99,8 @@ public class InternalTestClusterTests extends ElasticsearchTestCase {
         String nodePrefix = "foobar";
 
         Path baseDir = createTempDir();
-        InternalTestCluster cluster0 = new InternalTestCluster(clusterSeed, baseDir, minNumDataNodes, maxNumDataNodes, clusterName1, settingsSource, numClientNodes, enableHttpPipelining, nodePrefix);
-        InternalTestCluster cluster1 = new InternalTestCluster(clusterSeed, baseDir, minNumDataNodes, maxNumDataNodes, clusterName2, settingsSource, numClientNodes, enableHttpPipelining, nodePrefix);
+        InternalTestCluster cluster0 = new InternalTestCluster("local", clusterSeed, baseDir, minNumDataNodes, maxNumDataNodes, clusterName1, settingsSource, numClientNodes, enableHttpPipelining, nodePrefix);
+        InternalTestCluster cluster1 = new InternalTestCluster("local", clusterSeed, baseDir, minNumDataNodes, maxNumDataNodes, clusterName2, settingsSource, numClientNodes, enableHttpPipelining, nodePrefix);
 
         assertClusters(cluster0, cluster1, false);
         long seed = randomLong();
@@ -124,7 +124,6 @@ public class InternalTestClusterTests extends ElasticsearchTestCase {
             cluster0.afterTest();
             cluster1.afterTest();
         } finally {
-
             IOUtils.close(cluster0, cluster1);
         }
     }

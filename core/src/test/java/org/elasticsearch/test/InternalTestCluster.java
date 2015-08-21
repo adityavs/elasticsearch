@@ -26,11 +26,15 @@ import com.carrotsearch.randomizedtesting.generators.RandomPicks;
 import com.carrotsearch.randomizedtesting.generators.RandomStrings;
 import com.google.common.base.Predicate;
 import com.google.common.base.Predicates;
-import com.google.common.collect.*;
+import com.google.common.collect.Collections2;
+import com.google.common.collect.Iterables;
+import com.google.common.collect.Iterators;
+import com.google.common.collect.Lists;
+import com.google.common.collect.Maps;
+import com.google.common.collect.Sets;
 import com.google.common.util.concurrent.Futures;
 import com.google.common.util.concurrent.ListenableFuture;
 import com.google.common.util.concurrent.SettableFuture;
-
 import org.apache.lucene.store.StoreRateLimiting;
 import org.apache.lucene.util.IOUtils;
 import org.elasticsearch.ElasticsearchException;
@@ -38,7 +42,6 @@ import org.elasticsearch.Version;
 import org.elasticsearch.action.admin.cluster.node.stats.NodeStats;
 import org.elasticsearch.action.admin.indices.stats.CommonStatsFlags;
 import org.elasticsearch.cache.recycler.PageCacheRecycler;
-import org.elasticsearch.cache.recycler.PageCacheRecyclerModule;
 import org.elasticsearch.client.Client;
 import org.elasticsearch.client.transport.TransportClient;
 import org.elasticsearch.cluster.ClusterName;
@@ -50,6 +53,7 @@ import org.elasticsearch.cluster.node.DiscoveryNode;
 import org.elasticsearch.cluster.node.DiscoveryNodes;
 import org.elasticsearch.cluster.routing.OperationRouting;
 import org.elasticsearch.cluster.routing.ShardRouting;
+import org.elasticsearch.cluster.routing.UnassignedInfo;
 import org.elasticsearch.cluster.routing.allocation.decider.DiskThresholdDecider;
 import org.elasticsearch.cluster.routing.allocation.decider.ThrottlingAllocationDecider;
 import org.elasticsearch.common.Nullable;
@@ -67,22 +71,17 @@ import org.elasticsearch.common.transport.TransportAddress;
 import org.elasticsearch.common.unit.ByteSizeUnit;
 import org.elasticsearch.common.unit.ByteSizeValue;
 import org.elasticsearch.common.unit.TimeValue;
-import org.elasticsearch.common.util.BigArraysModule;
 import org.elasticsearch.common.util.concurrent.EsExecutors;
 import org.elasticsearch.env.NodeEnvironment;
 import org.elasticsearch.http.HttpServerTransport;
 import org.elasticsearch.index.IndexService;
-import org.elasticsearch.index.cache.query.QueryCacheModule;
-import org.elasticsearch.index.cache.query.QueryCacheModule.QueryCacheSettings;
-import org.elasticsearch.index.cache.query.index.IndexQueryCache;
-import org.elasticsearch.index.cache.query.none.NoneQueryCache;
+import org.elasticsearch.index.cache.IndexCacheModule;
 import org.elasticsearch.index.engine.CommitStats;
 import org.elasticsearch.index.engine.Engine;
 import org.elasticsearch.index.engine.EngineClosedException;
 import org.elasticsearch.index.shard.IndexShard;
-import org.elasticsearch.index.shard.IndexShardModule;
+import org.elasticsearch.index.shard.MockEngineFactoryPlugin;
 import org.elasticsearch.index.shard.ShardId;
-import org.elasticsearch.index.store.IndexStoreModule;
 import org.elasticsearch.indices.IndicesService;
 import org.elasticsearch.indices.breaker.CircuitBreakerService;
 import org.elasticsearch.indices.breaker.HierarchyCircuitBreakerService;
@@ -91,45 +90,56 @@ import org.elasticsearch.indices.fielddata.cache.IndicesFieldDataCache;
 import org.elasticsearch.indices.recovery.RecoverySettings;
 import org.elasticsearch.indices.store.IndicesStore;
 import org.elasticsearch.node.Node;
+import org.elasticsearch.node.NodeMocksPlugin;
 import org.elasticsearch.node.internal.InternalSettingsPreparer;
 import org.elasticsearch.node.service.NodeService;
-import org.elasticsearch.plugins.PluginsService;
 import org.elasticsearch.script.ScriptService;
 import org.elasticsearch.search.SearchService;
-import org.elasticsearch.search.SearchServiceModule;
-import org.elasticsearch.test.cache.recycler.MockBigArraysModule;
-import org.elasticsearch.test.cache.recycler.MockPageCacheRecyclerModule;
 import org.elasticsearch.test.disruption.ServiceDisruptionScheme;
-import org.elasticsearch.test.engine.MockEngineFactory;
-import org.elasticsearch.test.search.MockSearchServiceModule;
-import org.elasticsearch.test.store.MockFSIndexStoreModule;
+import org.elasticsearch.search.MockSearchService;
+import org.elasticsearch.test.store.MockFSIndexStore;
 import org.elasticsearch.test.transport.AssertingLocalTransport;
 import org.elasticsearch.test.transport.MockTransportService;
 import org.elasticsearch.threadpool.ThreadPool;
 import org.elasticsearch.transport.Transport;
-import org.elasticsearch.transport.TransportModule;
 import org.elasticsearch.transport.TransportService;
 import org.elasticsearch.transport.netty.NettyTransport;
 import org.junit.Assert;
 
 import java.io.Closeable;
 import java.io.IOException;
+import java.net.InetAddress;
 import java.net.InetSocketAddress;
 import java.nio.file.Path;
-import java.util.*;
+import java.util.ArrayList;
+import java.util.Arrays;
+import java.util.Collection;
+import java.util.Collections;
+import java.util.HashMap;
+import java.util.HashSet;
+import java.util.Iterator;
+import java.util.List;
+import java.util.Map;
+import java.util.NavigableMap;
+import java.util.Random;
+import java.util.Set;
+import java.util.TreeMap;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.concurrent.atomic.AtomicInteger;
 
 import static junit.framework.Assert.fail;
-import static org.apache.lucene.util.LuceneTestCase.*;
+import static org.apache.lucene.util.LuceneTestCase.TEST_NIGHTLY;
+import static org.apache.lucene.util.LuceneTestCase.rarely;
+import static org.apache.lucene.util.LuceneTestCase.usually;
 import static org.elasticsearch.common.settings.Settings.settingsBuilder;
 import static org.elasticsearch.node.NodeBuilder.nodeBuilder;
-import static org.elasticsearch.test.ElasticsearchTestCase.assertBusy;
+import static org.elasticsearch.test.ESTestCase.assertBusy;
 import static org.elasticsearch.test.hamcrest.ElasticsearchAssertions.assertNoTimeout;
-import static org.hamcrest.Matchers.*;
-import static org.junit.Assert.assertFalse;
+import static org.hamcrest.Matchers.equalTo;
+import static org.hamcrest.Matchers.greaterThan;
+import static org.hamcrest.Matchers.greaterThanOrEqualTo;
 import static org.junit.Assert.assertThat;
 
 /**
@@ -140,7 +150,7 @@ import static org.junit.Assert.assertThat;
  * The Cluster is bound to a test lifecycle where tests must call {@link #beforeTest(java.util.Random, double)} and
  * {@link #afterTest()} to initialize and reset the cluster in order to be more reproducible. The term "more" relates
  * to the async nature of Elasticsearch in combination with randomized testing. Once Threads and asynchronous calls
- * are involved reproducibility is very limited. This class should only be used through {@link ElasticsearchIntegrationTest}.
+ * are involved reproducibility is very limited. This class should only be used through {@link ESIntegTestCase}.
  * </p>
  */
 public final class InternalTestCluster extends TestCluster {
@@ -154,7 +164,7 @@ public final class InternalTestCluster extends TestCluster {
      * system without asserting modules that to make sure they don't hide any bugs in
      * production.
      *
-     * @see ElasticsearchIntegrationTest
+     * @see ESIntegTestCase
      */
     public static final String TESTS_ENABLE_MOCK_MODULES = "tests.enable_mock_modules";
 
@@ -163,8 +173,13 @@ public final class InternalTestCluster extends TestCluster {
      */
     public static final String SETTING_CLUSTER_NODE_SEED = "test.cluster.node.seed";
 
+    /**
+     * The number of ports in the range used for this JVM
+     */
+    public static final int PORTS_PER_JVM = 100;
+
     private static final int JVM_ORDINAL = Integer.parseInt(System.getProperty(SysGlobals.CHILDVM_SYSPROP_JVM_ID, "0"));
-    public static final int BASE_PORT = 9300 + 100 * (JVM_ORDINAL + 1);
+    public static final int BASE_PORT = 9300 + PORTS_PER_JVM * (JVM_ORDINAL + 1);
 
     private static final boolean ENABLE_MOCK_MODULES = RandomizedTest.systemPropertyAsBoolean(TESTS_ENABLE_MOCK_MODULES, true);
 
@@ -176,8 +191,6 @@ public final class InternalTestCluster extends TestCluster {
     static final int DEFAULT_MAX_NUM_CLIENT_NODES = 1;
 
     static final boolean DEFAULT_ENABLE_HTTP_PIPELINING = true;
-
-    public static final String NODE_MODE = nodeMode();
 
     /* sorted map to make traverse order reproducible, concurrent since we do checks on it not within a sync block */
     private final NavigableMap<String, NodeAndClient> nodes = new TreeMap<>();
@@ -212,16 +225,21 @@ public final class InternalTestCluster extends TestCluster {
     private final Path baseDir;
 
     private ServiceDisruptionScheme activeDisruptionScheme;
+    private String nodeMode;
 
-    public InternalTestCluster(long clusterSeed, Path baseDir, int minNumDataNodes, int maxNumDataNodes, String clusterName, int numClientNodes,
+    public InternalTestCluster(String nodeMode, long clusterSeed, Path baseDir, int minNumDataNodes, int maxNumDataNodes, String clusterName, int numClientNodes,
                                boolean enableHttpPipelining, String nodePrefix) {
-        this(clusterSeed, baseDir, minNumDataNodes, maxNumDataNodes, clusterName, DEFAULT_SETTINGS_SOURCE, numClientNodes, enableHttpPipelining, nodePrefix);
+        this(nodeMode, clusterSeed, baseDir, minNumDataNodes, maxNumDataNodes, clusterName, DEFAULT_SETTINGS_SOURCE, numClientNodes, enableHttpPipelining, nodePrefix);
     }
 
-    public InternalTestCluster(long clusterSeed, Path baseDir,
+    public InternalTestCluster(String nodeMode, long clusterSeed, Path baseDir,
                                int minNumDataNodes, int maxNumDataNodes, String clusterName, SettingsSource settingsSource, int numClientNodes,
-                                boolean enableHttpPipelining, String nodePrefix) {
+                               boolean enableHttpPipelining, String nodePrefix) {
         super(clusterSeed);
+        if ("network".equals(nodeMode) == false && "local".equals(nodeMode) == false) {
+            throw new IllegalArgumentException("Unknown nodeMode: " + nodeMode);
+        }
+        this.nodeMode = nodeMode;
         this.baseDir = baseDir;
         this.clusterName = clusterName;
         if (minNumDataNodes < 0 || maxNumDataNodes < 0) {
@@ -279,16 +297,14 @@ public final class InternalTestCluster extends TestCluster {
                 builder.put("path.data", dataPath.toString());
             }
         }
-        builder.put("bootstrap.sigar", rarely(random));
+        builder.put("path.shared_data", baseDir.resolve("custom"));
         builder.put("path.home", baseDir);
         builder.put("path.repo", baseDir.resolve("repos"));
-        builder.put("transport.tcp.port", BASE_PORT + "-" + (BASE_PORT+100));
-        builder.put("http.port", BASE_PORT+101 + "-" + (BASE_PORT+200));
+        builder.put("transport.tcp.port", BASE_PORT + "-" + (BASE_PORT + 100));
+        builder.put("http.port", BASE_PORT + 101 + "-" + (BASE_PORT + 200));
         builder.put(InternalSettingsPreparer.IGNORE_SYSTEM_PROPERTIES_SETTING, true);
-        builder.put("node.mode", NODE_MODE);
+        builder.put("node.mode", nodeMode);
         builder.put("http.pipelining", enableHttpPipelining);
-        builder.put("plugins." + PluginsService.LOAD_PLUGIN_FROM_CLASSPATH, false);
-        builder.put(NodeEnvironment.SETTING_CUSTOM_DATA_PATH_ENABLED, true);
         if (Strings.hasLength(System.getProperty("es.logger.level"))) {
             builder.put("logger.level", System.getProperty("es.logger.level"));
         }
@@ -311,10 +327,10 @@ public final class InternalTestCluster extends TestCluster {
         // always reduce this - it can make tests really slow
         builder.put(RecoverySettings.INDICES_RECOVERY_RETRY_DELAY_STATE_SYNC, TimeValue.timeValueMillis(RandomInts.randomIntBetween(random, 20, 50)));
         defaultSettings = builder.build();
-        executor = EsExecutors.newCached(0, TimeUnit.SECONDS, EsExecutors.daemonThreadFactory("test_" + clusterName));
+        executor = EsExecutors.newCached("test runner", 0, TimeUnit.SECONDS, EsExecutors.daemonThreadFactory("test_" + clusterName));
     }
 
-    public static String nodeMode() {
+    public static String configuredNodeMode() {
         Builder builder = Settings.builder();
         if (Strings.isEmpty(System.getProperty("es.node.mode")) && Strings.isEmpty(System.getProperty("es.node.local"))) {
             return "local"; // default if nothing is specified
@@ -341,11 +357,8 @@ public final class InternalTestCluster extends TestCluster {
         return nodes.keySet().toArray(Strings.EMPTY_ARRAY);
     }
 
-    private static boolean isLocalTransportConfigured() {
-        if ("local".equals(System.getProperty("es.node.mode", "network"))) {
-            return true;
-        }
-        return Boolean.parseBoolean(System.getProperty("es.node.local", "false"));
+    private boolean isLocalTransportConfigured() {
+        return "local".equals(nodeMode);
     }
 
     private Settings getSettings(int nodeOrdinal, long nodeSeed, Settings others) {
@@ -365,20 +378,20 @@ public final class InternalTestCluster extends TestCluster {
         return builder.build();
     }
 
-    private static Settings getRandomNodeSettings(long seed) {
+    private Settings getRandomNodeSettings(long seed) {
         Random random = new Random(seed);
         Builder builder = Settings.settingsBuilder()
                 .put(SETTING_CLUSTER_NODE_SEED, seed);
         if (ENABLE_MOCK_MODULES && usually(random)) {
-            builder.put(IndexStoreModule.STORE_TYPE, MockFSIndexStoreModule.class.getName());
-            builder.put(IndexShardModule.ENGINE_FACTORY, MockEngineFactory.class);
-            builder.put(PageCacheRecyclerModule.CACHE_IMPL, MockPageCacheRecyclerModule.class.getName());
-            builder.put(BigArraysModule.IMPL, MockBigArraysModule.class.getName());
-            builder.put(TransportModule.TRANSPORT_SERVICE_TYPE_KEY, MockTransportService.class.getName());
-            builder.put(SearchServiceModule.IMPL, MockSearchServiceModule.class.getName());
+            builder.extendArray("plugin.types",
+                MockTransportService.TestPlugin.class.getName(),
+                MockFSIndexStore.TestPlugin.class.getName(),
+                NodeMocksPlugin.class.getName(),
+                MockEngineFactoryPlugin.class.getName(),
+                MockSearchService.TestPlugin.class.getName());
         }
         if (isLocalTransportConfigured()) {
-            builder.put(TransportModule.TRANSPORT_TYPE_KEY, AssertingLocalTransport.class.getName());
+            builder.extendArray("plugin.types", AssertingLocalTransport.TestPlugin.class.getName());
         } else {
             builder.put(Transport.TransportSettings.TRANSPORT_TCP_COMPRESS, rarely(random));
         }
@@ -438,11 +451,11 @@ public final class InternalTestCluster extends TestCluster {
         }
 
         if (random.nextBoolean()) {
-            builder.put(QueryCacheModule.QueryCacheSettings.QUERY_CACHE_TYPE, random.nextBoolean() ? IndexQueryCache.class : NoneQueryCache.class);
+            builder.put(IndexCacheModule.QUERY_CACHE_TYPE, random.nextBoolean() ? IndexCacheModule.INDEX_QUERY_CACHE : IndexCacheModule.NONE_QUERY_CACHE);
         }
 
         if (random.nextBoolean()) {
-            builder.put(QueryCacheSettings.QUERY_CACHE_EVERYTHING, random.nextBoolean());
+            builder.put(IndexCacheModule.QUERY_CACHE_EVERYTHING, random.nextBoolean());
         }
 
         if (random.nextBoolean()) {
@@ -483,13 +496,15 @@ public final class InternalTestCluster extends TestCluster {
             builder.put(ScriptService.SCRIPT_CACHE_EXPIRE_SETTING, TimeValue.timeValueMillis(RandomInts.randomIntBetween(random, 750, 10000000)));
         }
 
+        // always default delayed allocation to 0 to make sure we have tests are not delayed
+        builder.put(UnassignedInfo.INDEX_DELAYED_NODE_LEFT_TIMEOUT_SETTING, 0);
+
         return builder.build();
     }
 
     public static String clusterName(String prefix, long clusterSeed) {
         StringBuilder builder = new StringBuilder(prefix);
         final int childVM = RandomizedTest.systemPropertyAsInt(SysGlobals.CHILDVM_SYSPROP_JVM_ID, 0);
-        builder.append('-').append(NetworkUtils.getLocalHostName("__default_host__"));
         builder.append("-CHILD_VM=[").append(childVM).append(']');
         builder.append("-CLUSTER_SEED=[").append(clusterSeed).append(']');
         // if multiple maven task run on a single host we better have an identifier that doesn't rely on input params
@@ -767,6 +782,10 @@ public final class InternalTestCluster extends TestCluster {
         }
     }
 
+    public String getNodeMode() {
+        return nodeMode;
+    }
+
     private final class NodeAndClient implements Closeable {
         private Node node;
         private Client nodeClient;
@@ -829,7 +848,7 @@ public final class InternalTestCluster extends TestCluster {
             /* no sniff client for now - doesn't work will all tests since it might throw NoNodeAvailableException if nodes are shut down.
              * we first need support of transportClientRatio as annotations or so
              */
-            return transportClient = new TransportClientFactory(false, settingsSource.transportClient(), baseDir).client(node, clusterName);
+            return transportClient = new TransportClientFactory(false, settingsSource.transportClient(), baseDir, nodeMode).client(node, clusterName);
         }
 
         void resetClient() throws IOException {
@@ -886,11 +905,13 @@ public final class InternalTestCluster extends TestCluster {
         private final boolean sniff;
         private final Settings settings;
         private final Path baseDir;
+        private final String nodeMode;
 
-        TransportClientFactory(boolean sniff, Settings settings, Path baseDir) {
+        TransportClientFactory(boolean sniff, Settings settings, Path baseDir, String nodeMode) {
             this.sniff = sniff;
             this.settings = settings != null ? settings : Settings.EMPTY;
             this.baseDir = baseDir;
+            this.nodeMode = nodeMode;
         }
 
         public Client client(Node node, String clusterName) {
@@ -900,9 +921,8 @@ public final class InternalTestCluster extends TestCluster {
                     .put("client.transport.nodes_sampler_interval", "1s")
                     .put("path.home", baseDir)
                     .put("name", TRANSPORT_CLIENT_PREFIX + node.settings().get("name"))
-                    .put("plugins." + PluginsService.LOAD_PLUGIN_FROM_CLASSPATH, false)
                     .put(ClusterName.SETTING, clusterName).put("client.transport.sniff", sniff)
-                    .put("node.mode", nodeSettings.get("node.mode", NODE_MODE))
+                    .put("node.mode", nodeSettings.get("node.mode", nodeMode))
                     .put("node.local", nodeSettings.get("node.local", ""))
                     .put("logger.prefix", nodeSettings.get("logger.prefix", ""))
                     .put("logger.level", nodeSettings.get("logger.level", "INFO"))
@@ -1278,6 +1298,18 @@ public final class InternalTestCluster extends TestCluster {
         }
     }
 
+    /**
+     * Restarts a node and calls the callback during restart.
+     */
+    public void restartNode(String nodeName, RestartCallback callback) throws Exception {
+        ensureOpen();
+        NodeAndClient nodeAndClient = nodes.get(nodeName);
+        if (nodeAndClient != null) {
+            logger.info("Restarting node [{}] ", nodeAndClient.name);
+            nodeAndClient.restart(callback);
+        }
+    }
+
     private void restartAllNodes(boolean rollingRestart, RestartCallback callback) throws Exception {
         ensureOpen();
         List<NodeAndClient> toRemove = new ArrayList<>();
@@ -1335,7 +1367,7 @@ public final class InternalTestCluster extends TestCluster {
     }
 
 
-    private static final RestartCallback EMPTY_CALLBACK = new RestartCallback() {
+    public static final RestartCallback EMPTY_CALLBACK = new RestartCallback() {
         @Override
         public Settings onNodeStopped(String node) {
             return null;
@@ -1460,6 +1492,52 @@ public final class InternalTestCluster extends TestCluster {
         return buildNode.name;
     }
 
+    public synchronized ListenableFuture<List<String>> startMasterOnlyNodesAsync(int numNodes) {
+        return startMasterOnlyNodesAsync(numNodes, Settings.EMPTY);
+    }
+
+    public synchronized ListenableFuture<List<String>> startMasterOnlyNodesAsync(int numNodes, Settings settings) {
+        Settings settings1 = Settings.builder().put(settings).put("node.master", true).put("node.data", false).build();
+        return startNodesAsync(numNodes, settings1, Version.CURRENT);
+    }
+
+    public synchronized ListenableFuture<List<String>> startDataOnlyNodesAsync(int numNodes) {
+        return startDataOnlyNodesAsync(numNodes, Settings.EMPTY);
+    }
+
+    public synchronized ListenableFuture<List<String>> startDataOnlyNodesAsync(int numNodes, Settings settings) {
+        Settings settings1 = Settings.builder().put(settings).put("node.master", false).put("node.data", true).build();
+        return startNodesAsync(numNodes, settings1, Version.CURRENT);
+    }
+
+    public synchronized ListenableFuture<String> startMasterOnlyNodeAsync() {
+        return startMasterOnlyNodeAsync(Settings.EMPTY);
+    }
+
+    public synchronized ListenableFuture<String> startMasterOnlyNodeAsync(Settings settings) {
+        Settings settings1 = Settings.builder().put(settings).put("node.master", true).put("node.data", false).build();
+        return startNodeAsync(settings1, Version.CURRENT);
+    }
+
+    public synchronized String startMasterOnlyNode(Settings settings) {
+        Settings settings1 = Settings.builder().put(settings).put("node.master", true).put("node.data", false).build();
+        return startNode(settings1, Version.CURRENT);
+    }
+
+    public synchronized ListenableFuture<String> startDataOnlyNodeAsync() {
+        return startDataOnlyNodeAsync(Settings.EMPTY);
+    }
+
+    public synchronized ListenableFuture<String> startDataOnlyNodeAsync(Settings settings) {
+        Settings settings1 = Settings.builder().put(settings).put("node.master", false).put("node.data", true).build();
+        return startNodeAsync(settings1, Version.CURRENT);
+    }
+
+    public synchronized String startDataOnlyNode(Settings settings) {
+        Settings settings1 = Settings.builder().put(settings).put("node.master", false).put("node.data", true).build();
+        return startNode(settings1, Version.CURRENT);
+    }
+
     /**
      * Starts a node in an async manner with the given settings and returns future with its name.
      */
@@ -1567,20 +1645,7 @@ public final class InternalTestCluster extends TestCluster {
         if (activeDisruptionScheme != null) {
             TimeValue expectedHealingTime = activeDisruptionScheme.expectedTimeToHeal();
             logger.info("Clearing active scheme {}, expected healing time {}", activeDisruptionScheme, expectedHealingTime);
-            activeDisruptionScheme.removeFromCluster(this);
-            // We don't what scheme is picked, certain schemes don't partition the cluster, but process slow, so we need
-            // to to sleep, cluster health alone doesn't verify if these schemes have been cleared.
-            if (expectedHealingTime != null && expectedHealingTime.millis() > 0) {
-                try {
-                    Thread.sleep(expectedHealingTime.millis());
-                } catch (InterruptedException e) {
-                    Thread.currentThread().interrupt();
-                }
-            }
-            assertFalse("cluster failed to form after disruption was healed", client().admin().cluster().prepareHealth()
-                    .setWaitForNodes("" + nodes.size())
-                    .setWaitForRelocatingShards(0)
-                    .get().isTimedOut());
+            activeDisruptionScheme.removeAndEnsureHealthy(this);
         }
         activeDisruptionScheme = null;
     }
@@ -1731,7 +1796,7 @@ public final class InternalTestCluster extends TestCluster {
      * and / or {@link #fullRestart(InternalTestCluster.RestartCallback)} to execute actions at certain
      * stages of the restart.
      */
-    public static abstract class RestartCallback {
+    public static class RestartCallback {
 
         /**
          * Executed once the give node name has been stopped.

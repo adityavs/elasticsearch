@@ -22,12 +22,13 @@ package org.elasticsearch.transport;
 import com.google.common.collect.ImmutableMap;
 import org.elasticsearch.Version;
 import org.elasticsearch.cluster.node.DiscoveryNode;
+import org.elasticsearch.common.io.stream.NamedWriteableRegistry;
 import org.elasticsearch.common.io.stream.StreamInput;
 import org.elasticsearch.common.io.stream.StreamOutput;
 import org.elasticsearch.common.settings.Settings;
 import org.elasticsearch.common.transport.TransportAddress;
 import org.elasticsearch.common.unit.TimeValue;
-import org.elasticsearch.test.ElasticsearchTestCase;
+import org.elasticsearch.test.ESTestCase;
 import org.elasticsearch.test.junit.annotations.TestLogging;
 import org.elasticsearch.test.transport.MockTransportService;
 import org.elasticsearch.threadpool.ThreadPool;
@@ -47,7 +48,7 @@ import static org.hamcrest.Matchers.*;
 /**
  *
  */
-public abstract class AbstractSimpleTransportTests extends ElasticsearchTestCase {
+public abstract class AbstractSimpleTransportTests extends ESTestCase {
 
     protected ThreadPool threadPool;
 
@@ -59,7 +60,7 @@ public abstract class AbstractSimpleTransportTests extends ElasticsearchTestCase
     protected DiscoveryNode nodeB;
     protected MockTransportService serviceB;
 
-    protected abstract MockTransportService build(Settings settings, Version version);
+    protected abstract MockTransportService build(Settings settings, Version version, NamedWriteableRegistry namedWriteableRegistry);
 
     @Override
     @Before
@@ -68,12 +69,12 @@ public abstract class AbstractSimpleTransportTests extends ElasticsearchTestCase
         threadPool = new ThreadPool(getClass().getName());
         serviceA = build(
                 Settings.builder().put("name", "TS_A", TransportService.SETTING_TRACE_LOG_INCLUDE, "", TransportService.SETTING_TRACE_LOG_EXCLUDE, "NOTHING").build(),
-                version0
+                version0, new NamedWriteableRegistry()
         );
         nodeA = new DiscoveryNode("TS_A", "TS_A", serviceA.boundAddress().publishAddress(), ImmutableMap.<String, String>of(), version0);
         serviceB = build(
                 Settings.builder().put("name", "TS_B", TransportService.SETTING_TRACE_LOG_INCLUDE, "", TransportService.SETTING_TRACE_LOG_EXCLUDE, "NOTHING").build(),
-                version1
+                version1, new NamedWriteableRegistry()
         );
         nodeB = new DiscoveryNode("TS_B", "TS_B", serviceB.boundAddress().publishAddress(), ImmutableMap.<String, String>of(), version1);
 
@@ -575,7 +576,6 @@ public abstract class AbstractSimpleTransportTests extends ElasticsearchTestCase
 
     @Test
     @TestLogging(value = "test. transport.tracer:TRACE")
-    @AwaitsFix(bugUrl = "@spinscale is looking into failures: http://build-us-00.elastic.co/job/es_core_master_strong/3986/")
     public void testTracerLog() throws InterruptedException {
         TransportRequestHandler handler = new TransportRequestHandler<StringMessageRequest>() {
             @Override

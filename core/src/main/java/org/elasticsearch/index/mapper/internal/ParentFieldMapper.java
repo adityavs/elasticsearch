@@ -37,14 +37,12 @@ import org.elasticsearch.index.fielddata.FieldDataType;
 import org.elasticsearch.index.mapper.DocumentMapper;
 import org.elasticsearch.index.mapper.MappedFieldType;
 import org.elasticsearch.index.mapper.Mapper;
-import org.elasticsearch.index.mapper.MapperBuilders;
 import org.elasticsearch.index.mapper.MapperParsingException;
 import org.elasticsearch.index.mapper.MergeMappingException;
 import org.elasticsearch.index.mapper.MergeResult;
+import org.elasticsearch.index.mapper.MetadataFieldMapper;
 import org.elasticsearch.index.mapper.ParseContext;
-import org.elasticsearch.index.mapper.RootMapper;
 import org.elasticsearch.index.mapper.Uid;
-import org.elasticsearch.index.mapper.core.AbstractFieldMapper;
 import org.elasticsearch.index.query.QueryParseContext;
 
 import java.io.IOException;
@@ -54,19 +52,18 @@ import java.util.Iterator;
 import java.util.List;
 import java.util.Map;
 
-import static org.elasticsearch.common.settings.Settings.builder;
 import static org.elasticsearch.common.settings.Settings.settingsBuilder;
 import static org.elasticsearch.common.xcontent.support.XContentMapValues.nodeMapValue;
 
 /**
  *
  */
-public class ParentFieldMapper extends AbstractFieldMapper implements RootMapper {
+public class ParentFieldMapper extends MetadataFieldMapper {
 
     public static final String NAME = "_parent";
     public static final String CONTENT_TYPE = "_parent";
 
-    public static class Defaults extends AbstractFieldMapper.Defaults {
+    public static class Defaults {
         public static final String NAME = ParentFieldMapper.NAME;
 
         public static final MappedFieldType FIELD_TYPE = new ParentFieldType();
@@ -79,17 +76,15 @@ public class ParentFieldMapper extends AbstractFieldMapper implements RootMapper
             FIELD_TYPE.setIndexAnalyzer(Lucene.KEYWORD_ANALYZER);
             FIELD_TYPE.setSearchAnalyzer(Lucene.KEYWORD_ANALYZER);
             FIELD_TYPE.setNames(new MappedFieldType.Names(NAME));
-            FIELD_TYPE.setFieldDataType(new FieldDataType("_parent", settingsBuilder().put(MappedFieldType.Loading.KEY, MappedFieldType.Loading.LAZY_VALUE)));
             FIELD_TYPE.freeze();
         }
     }
 
-    public static class Builder extends AbstractFieldMapper.Builder<Builder, ParentFieldMapper> {
+    public static class Builder extends MetadataFieldMapper.Builder<Builder, ParentFieldMapper> {
 
         protected String indexName;
 
         private String type;
-        protected Settings fieldDataSettings;
 
         public Builder() {
             super(Defaults.NAME, Defaults.FIELD_TYPE);
@@ -102,18 +97,14 @@ public class ParentFieldMapper extends AbstractFieldMapper implements RootMapper
             return builder;
         }
 
-        public Builder fieldDataSettings(Settings settings) {
-            this.fieldDataSettings = settings;
-            return builder;
-        }
-
         @Override
         public ParentFieldMapper build(BuilderContext context) {
             if (type == null) {
                 throw new MapperParsingException("[_parent] field mapping must contain the [type] option");
             }
             setupFieldType(context);
-            return new ParentFieldMapper(fieldType, type, fieldDataSettings, context.indexSettings());
+            fieldType.setHasDocValues(context.indexCreatedVersion().onOrAfter(Version.V_2_0_0_beta1));
+            return new ParentFieldMapper(fieldType, type, context.indexSettings());
         }
     }
 
@@ -128,7 +119,7 @@ public class ParentFieldMapper extends AbstractFieldMapper implements RootMapper
                 if (fieldName.equals("type")) {
                     builder.type(fieldNode.toString());
                     iterator.remove();
-                } else if (fieldName.equals("postings_format") && parserContext.indexVersionCreated().before(Version.V_2_0_0)) {
+                } else if (fieldName.equals("postings_format") && parserContext.indexVersionCreated().before(Version.V_2_0_0_beta1)) {
                     // ignore before 2.0, reject on and after 2.0
                     iterator.remove();
                 } else if (fieldName.equals("fielddata")) {
@@ -147,7 +138,9 @@ public class ParentFieldMapper extends AbstractFieldMapper implements RootMapper
 
     static final class ParentFieldType extends MappedFieldType {
 
-        public ParentFieldType() {}
+        public ParentFieldType() {
+            setFieldDataType(new FieldDataType("_parent", settingsBuilder().put(MappedFieldType.Loading.KEY, Loading.EAGER_VALUE)));
+        }
 
         protected ParentFieldType(ParentFieldType ref) {
             super(ref);
@@ -231,30 +224,23 @@ public class ParentFieldMapper extends AbstractFieldMapper implements RootMapper
 
     private final String type;
 
-    protected ParentFieldMapper(MappedFieldType fieldType, String type, @Nullable Settings fieldDataSettings, Settings indexSettings) {
-        super(fieldType, Version.indexCreated(indexSettings).onOrAfter(Version.V_2_0_0), fieldDataSettings, indexSettings);
+    protected ParentFieldMapper(MappedFieldType fieldType, String type, Settings indexSettings) {
+        super(NAME, setupDocValues(indexSettings, fieldType), setupDocValues(indexSettings, Defaults.FIELD_TYPE), indexSettings);
         this.type = type;
     }
 
     public ParentFieldMapper(Settings indexSettings, MappedFieldType existing) {
-        this(existing == null ? Defaults.FIELD_TYPE.clone() : existing.clone(),
-             null,
-             existing == null ? null : (existing.fieldDataType() == null ? null : existing.fieldDataType().getSettings()),
-             indexSettings);
+        this(existing == null ? Defaults.FIELD_TYPE.clone() : existing.clone(), null, indexSettings);
+    }
+
+    static MappedFieldType setupDocValues(Settings indexSettings, MappedFieldType fieldType) {
+        fieldType = fieldType.clone();
+        fieldType.setHasDocValues(Version.indexCreated(indexSettings).onOrAfter(Version.V_2_0_0_beta1));
+        return fieldType;
     }
 
     public String type() {
         return type;
-    }
-
-    @Override
-    public MappedFieldType defaultFieldType() {
-        return Defaults.FIELD_TYPE;
-    }
-
-    @Override
-    public FieldDataType defaultFieldDataType() {
-        return new FieldDataType("_parent", settingsBuilder().put(MappedFieldType.Loading.KEY, MappedFieldType.Loading.EAGER_VALUE));
     }
 
     @Override
@@ -263,7 +249,9 @@ public class ParentFieldMapper extends AbstractFieldMapper implements RootMapper
 
     @Override
     public void postParse(ParseContext context) throws IOException {
-        parse(context);
+        if (context.sourceToParse().flyweight() == false) {
+            parse(context);
+        }
     }
 
     @Override
@@ -330,9 +318,7 @@ public class ParentFieldMapper extends AbstractFieldMapper implements RootMapper
 
         builder.startObject(CONTENT_TYPE);
         builder.field("type", type);
-        if (hasCustomFieldDataSettings()) {
-            builder.field("fielddata", (Map) customFieldDataSettings.getAsMap());
-        } else if (includeDefaults) {
+        if (includeDefaults || hasCustomFieldDataSettings()) {
             builder.field("fielddata", (Map) fieldType().fieldDataType().getSettings().getAsMap());
         }
         builder.endObject();

@@ -39,6 +39,8 @@ public class RegexpQueryParser implements QueryParser {
 
     public static final String NAME = "regexp";
 
+    public static final int DEFAULT_FLAGS_VALUE = RegexpFlag.ALL.value();
+
     @Inject
     public RegexpQueryParser() {
     }
@@ -55,9 +57,9 @@ public class RegexpQueryParser implements QueryParser {
         String fieldName = parser.currentName();
         String rewriteMethod = null;
 
-        Object value = null;
+        String value = null;
         float boost = 1.0f;
-        int flagsValue = -1;
+        int flagsValue = DEFAULT_FLAGS_VALUE;
         int maxDeterminizedStates = Operations.DEFAULT_MAX_DETERMINIZED_STATES;
         String queryName = null;
         String currentFieldName = null;
@@ -74,7 +76,7 @@ public class RegexpQueryParser implements QueryParser {
                         currentFieldName = parser.currentName();
                     } else {
                         if ("value".equals(currentFieldName)) {
-                            value = parser.objectBytes();
+                            value = parser.textOrNull();
                         } else if ("boost".equals(currentFieldName)) {
                             boost = parser.floatValue();
                         } else if ("rewrite".equals(currentFieldName)) {
@@ -98,7 +100,7 @@ public class RegexpQueryParser implements QueryParser {
                     queryName = parser.text();
                 } else {
                     fieldName = currentFieldName;
-                    value = parser.objectBytes();
+                    value = parser.textOrNull();
                 }
             }
         }
@@ -107,7 +109,7 @@ public class RegexpQueryParser implements QueryParser {
             throw new QueryParsingException(parseContext, "No value specified for regexp query");
         }
 
-        MultiTermQuery.RewriteMethod method = QueryParsers.parseRewriteMethod(rewriteMethod, null);
+        MultiTermQuery.RewriteMethod method = QueryParsers.parseRewriteMethod(parseContext.parseFieldMatcher(), rewriteMethod, null);
 
         Query query = null;
         MappedFieldType fieldType = parseContext.fieldMapper(fieldName);

@@ -25,11 +25,12 @@ import org.elasticsearch.cluster.ClusterName;
 import org.elasticsearch.cluster.ClusterState;
 import org.elasticsearch.cluster.node.DiscoveryNode;
 import org.elasticsearch.cluster.node.DiscoveryNodes;
+import org.elasticsearch.common.io.stream.NamedWriteableRegistry;
 import org.elasticsearch.common.settings.Settings;
 import org.elasticsearch.discovery.zen.fd.FaultDetection;
 import org.elasticsearch.discovery.zen.fd.MasterFaultDetection;
 import org.elasticsearch.discovery.zen.fd.NodesFaultDetection;
-import org.elasticsearch.test.ElasticsearchTestCase;
+import org.elasticsearch.test.ESTestCase;
 import org.elasticsearch.test.cluster.NoopClusterService;
 import org.elasticsearch.test.transport.MockTransportService;
 import org.elasticsearch.threadpool.ThreadPool;
@@ -46,7 +47,7 @@ import java.util.concurrent.TimeUnit;
 
 import static org.hamcrest.Matchers.equalTo;
 
-public class ZenFaultDetectionTests extends ElasticsearchTestCase {
+public class ZenFaultDetectionTests extends ESTestCase {
 
     protected ThreadPool threadPool;
 
@@ -105,7 +106,7 @@ public class ZenFaultDetectionTests extends ElasticsearchTestCase {
     }
 
     protected MockTransportService build(Settings settings, Version version) {
-        MockTransportService transportService = new MockTransportService(Settings.EMPTY, new LocalTransport(settings, threadPool, version), threadPool);
+        MockTransportService transportService = new MockTransportService(Settings.EMPTY, new LocalTransport(settings, threadPool, version, new NamedWriteableRegistry()), threadPool);
         transportService.start();
         return transportService;
     }

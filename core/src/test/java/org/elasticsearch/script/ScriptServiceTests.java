@@ -30,7 +30,7 @@ import org.elasticsearch.script.expression.ExpressionScriptEngineService;
 import org.elasticsearch.script.groovy.GroovyScriptEngineService;
 import org.elasticsearch.script.mustache.MustacheScriptEngineService;
 import org.elasticsearch.search.lookup.SearchLookup;
-import org.elasticsearch.test.ElasticsearchTestCase;
+import org.elasticsearch.test.ESTestCase;
 import org.elasticsearch.watcher.ResourceWatcherService;
 import org.junit.Before;
 import org.junit.Test;
@@ -48,7 +48,7 @@ import static org.hamcrest.Matchers.equalTo;
 import static org.hamcrest.Matchers.notNullValue;
 import static org.hamcrest.Matchers.sameInstance;
 
-public class ScriptServiceTests extends ElasticsearchTestCase {
+public class ScriptServiceTests extends ESTestCase {
 
     private ResourceWatcherService resourceWatcherService;
     private Set<ScriptEngineService> scriptEngineServices;
@@ -148,7 +148,7 @@ public class ScriptServiceTests extends ElasticsearchTestCase {
             scriptService.compile(new Script("test_script", ScriptType.FILE, "test", null), ScriptContext.Standard.SEARCH);
             fail("the script test_script should no longer exist");
         } catch (IllegalArgumentException ex) {
-            assertThat(ex.getMessage(), containsString("Unable to find on disk script test_script"));
+            assertThat(ex.getMessage(), containsString("Unable to find on disk file script [test_script] using lang [test]"));
         }
     }
 
@@ -165,13 +165,23 @@ public class ScriptServiceTests extends ElasticsearchTestCase {
     }
 
     @Test
+    public void testInlineScriptCompiledOnceCache() throws IOException {
+        buildScriptService(Settings.EMPTY);
+        CompiledScript compiledScript1 = scriptService.compile(new Script("1+1", ScriptType.INLINE, "test", null),
+                randomFrom(scriptContexts));
+        CompiledScript compiledScript2 = scriptService.compile(new Script("1+1", ScriptType.INLINE, "test", null),
+                randomFrom(scriptContexts));
+        assertThat(compiledScript1.compiled(), sameInstance(compiledScript2.compiled()));
+    }
+
+    @Test
     public void testInlineScriptCompiledOnceMultipleLangAcronyms() throws IOException {
         buildScriptService(Settings.EMPTY);
         CompiledScript compiledScript1 = scriptService.compile(new Script("script", ScriptType.INLINE, "test", null),
                 randomFrom(scriptContexts));
         CompiledScript compiledScript2 = scriptService.compile(new Script("script", ScriptType.INLINE, "test2", null),
                 randomFrom(scriptContexts));
-        assertThat(compiledScript1, sameInstance(compiledScript2));
+        assertThat(compiledScript1.compiled(), sameInstance(compiledScript2.compiled()));
     }
 
     @Test
@@ -182,7 +192,7 @@ public class ScriptServiceTests extends ElasticsearchTestCase {
                 randomFrom(scriptContexts));
         CompiledScript compiledScript2 = scriptService.compile(new Script("file_script", ScriptType.FILE, "test2", null),
                 randomFrom(scriptContexts));
-        assertThat(compiledScript1, sameInstance(compiledScript2));
+        assertThat(compiledScript1.compiled(), sameInstance(compiledScript2.compiled()));
     }
 
     @Test
@@ -377,6 +387,73 @@ public class ScriptServiceTests extends ElasticsearchTestCase {
         }
     }
 
+    @Test
+    public void testCompileCountedInCompilationStats() throws IOException {
+        buildScriptService(Settings.EMPTY);
+        scriptService.compile(new Script("1+1", ScriptType.INLINE, "test", null), randomFrom(scriptContexts));
+        assertEquals(1L, scriptService.stats().getCompilations());
+    }
+
+    @Test
+    public void testExecutableCountedInCompilationStats() throws IOException {
+        buildScriptService(Settings.EMPTY);
+        scriptService.executable(new Script("1+1", ScriptType.INLINE, "test", null), randomFrom(scriptContexts));
+        assertEquals(1L, scriptService.stats().getCompilations());
+    }
+
+    @Test
+    public void testSearchCountedInCompilationStats() throws IOException {
+        buildScriptService(Settings.EMPTY);
+        scriptService.search(null, new Script("1+1", ScriptType.INLINE, "test", null), randomFrom(scriptContexts));
+        assertEquals(1L, scriptService.stats().getCompilations());
+    }
+
+    @Test
+    public void testMultipleCompilationsCountedInCompilationStats() throws IOException {
+        buildScriptService(Settings.EMPTY);
+        int numberOfCompilations = randomIntBetween(1, 1024);
+        for (int i = 0; i < numberOfCompilations; i++) {
+            scriptService.compile(new Script(i + " + " + i, ScriptType.INLINE, "test", null), randomFrom(scriptContexts));
+        }
+        assertEquals(numberOfCompilations, scriptService.stats().getCompilations());
+    }
+
+    @Test
+    public void testCompilationStatsOnCacheHit() throws IOException {
+        Settings.Builder builder = Settings.builder();
+        builder.put(ScriptService.SCRIPT_CACHE_SIZE_SETTING, 1);
+        buildScriptService(builder.build());
+        scriptService.executable(new Script("1+1", ScriptType.INLINE, "test", null), randomFrom(scriptContexts));
+        scriptService.executable(new Script("1+1", ScriptType.INLINE, "test", null), randomFrom(scriptContexts));
+        assertEquals(1L, scriptService.stats().getCompilations());
+    }
+
+    @Test
+    public void testFileScriptCountedInCompilationStats() throws IOException {
+        buildScriptService(Settings.EMPTY);
+        createFileScripts("test");
+        scriptService.compile(new Script("file_script", ScriptType.FILE, "test", null), randomFrom(scriptContexts));
+        assertEquals(1L, scriptService.stats().getCompilations());
+    }
+
+    @Test
+    public void testIndexedScriptCountedInCompilationStats() throws IOException {
+        buildScriptService(Settings.EMPTY);
+        scriptService.compile(new Script("script", ScriptType.INDEXED, "test", null), randomFrom(scriptContexts));
+        assertEquals(1L, scriptService.stats().getCompilations());
+    }
+
+    @Test
+    public void testCacheEvictionCountedInCacheEvictionsStats() throws IOException {
+        Settings.Builder builder = Settings.builder();
+        builder.put(ScriptService.SCRIPT_CACHE_SIZE_SETTING, 1);
+        buildScriptService(builder.build());
+        scriptService.executable(new Script("1+1", ScriptType.INLINE, "test", null), randomFrom(scriptContexts));
+        scriptService.executable(new Script("2+2", ScriptType.INLINE, "test", null), randomFrom(scriptContexts));
+        assertEquals(2L, scriptService.stats().getCompilations());
+        assertEquals(1L, scriptService.stats().getCacheEvictions());
+    }
+
     private void createFileScripts(String... langs) throws IOException {
         for (String lang : langs) {
             Path scriptPath = scriptsFilePath.resolve("file_script." + lang);
@@ -421,17 +498,17 @@ public class ScriptServiceTests extends ElasticsearchTestCase {
         }
 
         @Override
-        public ExecutableScript executable(final Object compiledScript, @Nullable Map<String, Object> vars) {
+        public ExecutableScript executable(final CompiledScript compiledScript, @Nullable Map<String, Object> vars) {
             return null;
         }
 
         @Override
-        public SearchScript search(Object compiledScript, SearchLookup lookup, @Nullable Map<String, Object> vars) {
+        public SearchScript search(CompiledScript compiledScript, SearchLookup lookup, @Nullable Map<String, Object> vars) {
             return null;
         }
 
         @Override
-        public Object execute(Object compiledScript, Map<String, Object> vars) {
+        public Object execute(CompiledScript compiledScript, Map<String, Object> vars) {
             return null;
         }
 

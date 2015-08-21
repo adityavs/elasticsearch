@@ -26,7 +26,7 @@ import org.elasticsearch.action.ActionRequest;
 import org.elasticsearch.action.ActionRequestValidationException;
 import org.elasticsearch.action.ActionResponse;
 import org.elasticsearch.common.settings.Settings;
-import org.elasticsearch.test.ElasticsearchTestCase;
+import org.elasticsearch.test.ESTestCase;
 import org.junit.Before;
 import org.junit.Test;
 
@@ -39,7 +39,7 @@ import java.util.concurrent.atomic.AtomicInteger;
 
 import static org.hamcrest.CoreMatchers.*;
 
-public class TransportActionFilterChainTests extends ElasticsearchTestCase {
+public class TransportActionFilterChainTests extends ESTestCase {
 
     private AtomicInteger counter;
 
@@ -64,7 +64,7 @@ public class TransportActionFilterChainTests extends ElasticsearchTestCase {
 
         String actionName = randomAsciiOfLength(randomInt(30));
         ActionFilters actionFilters = new ActionFilters(filters);
-        TransportAction<TestRequest, TestResponse> transportAction = new TransportAction<TestRequest, TestResponse>(Settings.EMPTY, actionName, null, actionFilters) {
+        TransportAction<TestRequest, TestResponse> transportAction = new TransportAction<TestRequest, TestResponse>(Settings.EMPTY, actionName, null, actionFilters, null) {
             @Override
             protected void doExecute(TestRequest request, ActionListener<TestResponse> listener) {
                 listener.onResponse(new TestResponse());
@@ -146,7 +146,7 @@ public class TransportActionFilterChainTests extends ElasticsearchTestCase {
 
         String actionName = randomAsciiOfLength(randomInt(30));
         ActionFilters actionFilters = new ActionFilters(filters);
-        TransportAction<TestRequest, TestResponse> transportAction = new TransportAction<TestRequest, TestResponse>(Settings.EMPTY, actionName, null, actionFilters) {
+        TransportAction<TestRequest, TestResponse> transportAction = new TransportAction<TestRequest, TestResponse>(Settings.EMPTY, actionName, null, actionFilters, null) {
             @Override
             protected void doExecute(TestRequest request, ActionListener<TestResponse> listener) {
                 listener.onResponse(new TestResponse());
@@ -231,7 +231,7 @@ public class TransportActionFilterChainTests extends ElasticsearchTestCase {
 
         String actionName = randomAsciiOfLength(randomInt(30));
         ActionFilters actionFilters = new ActionFilters(filters);
-        TransportAction<TestRequest, TestResponse> transportAction = new TransportAction<TestRequest, TestResponse>(Settings.EMPTY, actionName, null, actionFilters) {
+        TransportAction<TestRequest, TestResponse> transportAction = new TransportAction<TestRequest, TestResponse>(Settings.EMPTY, actionName, null, actionFilters, null) {
             @Override
             protected void doExecute(TestRequest request, ActionListener<TestResponse> listener) {
                 listener.onResponse(new TestResponse());
@@ -289,7 +289,7 @@ public class TransportActionFilterChainTests extends ElasticsearchTestCase {
 
         String actionName = randomAsciiOfLength(randomInt(30));
         ActionFilters actionFilters = new ActionFilters(filters);
-        TransportAction<TestRequest, TestResponse> transportAction = new TransportAction<TestRequest, TestResponse>(Settings.EMPTY, actionName, null, actionFilters) {
+        TransportAction<TestRequest, TestResponse> transportAction = new TransportAction<TestRequest, TestResponse>(Settings.EMPTY, actionName, null, actionFilters, null) {
             @Override
             protected void doExecute(TestRequest request, ActionListener<TestResponse> listener) {
                 listener.onResponse(new TestResponse());

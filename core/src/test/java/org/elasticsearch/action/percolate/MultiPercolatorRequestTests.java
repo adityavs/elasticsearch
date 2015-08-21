@@ -20,9 +20,9 @@ package org.elasticsearch.action.percolate;
 
 import org.elasticsearch.action.support.IndicesOptions;
 import org.elasticsearch.common.collect.MapBuilder;
-import org.elasticsearch.common.io.Streams;
+import org.elasticsearch.test.StreamsUtils;
 import org.elasticsearch.common.xcontent.XContentFactory;
-import org.elasticsearch.test.ElasticsearchTestCase;
+import org.elasticsearch.test.ESTestCase;
 import org.junit.Test;
 
 import java.util.Map;
@@ -31,11 +31,11 @@ import static org.hamcrest.Matchers.*;
 
 /**
  */
-public class MultiPercolatorRequestTests extends ElasticsearchTestCase {
+public class MultiPercolatorRequestTests extends ESTestCase {
 
     @Test
     public void testParseBulkRequests() throws Exception {
-        byte[] data = Streams.copyToBytesFromClasspath("/org/elasticsearch/action/percolate/mpercolate1.json");
+        byte[] data = StreamsUtils.copyToBytesFromClasspath("/org/elasticsearch/action/percolate/mpercolate1.json");
         MultiPercolateRequest request = new MultiPercolateRequest().add(data, 0, data.length);
 
         assertThat(request.requests().size(), equalTo(8));
@@ -152,7 +152,7 @@ public class MultiPercolatorRequestTests extends ElasticsearchTestCase {
 
     @Test
     public void testParseBulkRequests_defaults() throws Exception {
-        byte[] data = Streams.copyToBytesFromClasspath("/org/elasticsearch/action/percolate/mpercolate2.json");
+        byte[] data = StreamsUtils.copyToBytesFromClasspath("/org/elasticsearch/action/percolate/mpercolate2.json");
         MultiPercolateRequest request = new MultiPercolateRequest();
         request.indices("my-index1").documentType("my-type1").indicesOptions(IndicesOptions.lenientExpandOpen());
         request.add(data, 0, data.length);

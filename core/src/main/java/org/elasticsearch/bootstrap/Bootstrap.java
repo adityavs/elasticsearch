@@ -19,20 +19,17 @@
 
 package org.elasticsearch.bootstrap;
 
-import com.google.common.collect.Iterators;
-import com.google.common.collect.Lists;
-
-import org.apache.lucene.util.StringHelper;
 import org.apache.lucene.util.Constants;
+import org.apache.lucene.util.StringHelper;
 import org.elasticsearch.ExceptionsHelper;
 import org.elasticsearch.Version;
 import org.elasticsearch.common.PidFile;
 import org.elasticsearch.common.SuppressForbidden;
+import org.elasticsearch.common.cli.CliTool;
 import org.elasticsearch.common.cli.Terminal;
 import org.elasticsearch.common.collect.Tuple;
 import org.elasticsearch.common.inject.CreationException;
 import org.elasticsearch.common.inject.spi.Message;
-import org.elasticsearch.common.io.PathUtils;
 import org.elasticsearch.common.lease.Releasables;
 import org.elasticsearch.common.logging.ESLogger;
 import org.elasticsearch.common.logging.Loggers;
@@ -40,26 +37,16 @@ import org.elasticsearch.common.logging.log4j.LogConfigurator;
 import org.elasticsearch.common.settings.Settings;
 import org.elasticsearch.env.Environment;
 import org.elasticsearch.monitor.jvm.JvmInfo;
-import org.elasticsearch.monitor.process.JmxProcessProbe;
+import org.elasticsearch.monitor.os.OsProbe;
+import org.elasticsearch.monitor.process.ProcessProbe;
 import org.elasticsearch.node.Node;
 import org.elasticsearch.node.NodeBuilder;
 import org.elasticsearch.node.internal.InternalSettingsPreparer;
-import org.hyperic.sigar.Sigar;
 
-import java.io.IOException;
-import java.lang.reflect.Method;
-import java.net.URL;
-import java.nio.file.DirectoryStream;
-import java.nio.file.Files;
-import java.nio.file.Path;
-import java.nio.file.PathMatcher;
-import java.util.Arrays;
-import java.util.List;
 import java.util.Locale;
 import java.util.Set;
 import java.util.concurrent.CountDownLatch;
 
-import static org.elasticsearch.common.io.FileSystemUtils.isAccessibleDirectory;
 import static com.google.common.collect.Sets.newHashSet;
 import static org.elasticsearch.common.settings.Settings.Builder.EMPTY_SETTINGS;
 
@@ -97,7 +84,7 @@ public class Bootstrap {
     }
     
     /** initialize native resources */
-    public static void initializeNatives(boolean mlockAll, boolean ctrlHandler, boolean loadSigar) {
+    public static void initializeNatives(boolean mlockAll, boolean ctrlHandler) {
         final ESLogger logger = Loggers.getLogger(Bootstrap.class);
         
         // check if the user is running as root, and bail
@@ -140,20 +127,14 @@ public class Bootstrap {
             // we've already logged this.
         }
 
-        if (loadSigar) {
-            // initialize sigar explicitly
-            try {
-                Sigar.load();
-                logger.trace("sigar libraries loaded successfully");
-            } catch (Throwable t) {
-                logger.trace("failed to load sigar libraries", t);
-            }
-        } else {
-            logger.trace("sigar not loaded, disabled via settings");
-        }
-
         // init lucene random seed. it will use /dev/urandom where available:
         StringHelper.randomId();
+    }
+
+    static void initializeProbes() {
+        // Force probes to be loaded
+        ProcessProbe.getInstance();
+        OsProbe.getInstance();
     }
 
     public static boolean isMemoryLocked() {
@@ -161,9 +142,11 @@ public class Bootstrap {
     }
 
     private void setup(boolean addShutdownHook, Settings settings, Environment environment) throws Exception {
-        initializeNatives(settings.getAsBoolean("bootstrap.mlockall", false), 
-                          settings.getAsBoolean("bootstrap.ctrlhandler", true),
-                          settings.getAsBoolean("bootstrap.sigar", true));
+        initializeNatives(settings.getAsBoolean("bootstrap.mlockall", false),
+                settings.getAsBoolean("bootstrap.ctrlhandler", true));
+
+        // initialize probes before the security manager is installed
+        initializeProbes();
 
         if (addShutdownHook) {
             Runtime.getRuntime().addShutdownHook(new Thread() {
@@ -175,13 +158,10 @@ public class Bootstrap {
                 }
             });
         }
-        
-        // install any plugins into classpath
-        setupPlugins(environment);
-        
+
         // look for jar hell
         JarHell.checkJarHell();
-        
+
         // install SM after natives, shutdown hooks, etc.
         setupSecurity(settings, environment);
 
@@ -212,7 +192,7 @@ public class Bootstrap {
     @SuppressForbidden(reason = "Exception#printStackTrace()")
     private static void setupLogging(Settings settings, Environment environment) {
         try {
-            settings.getClassLoader().loadClass("org.apache.log4j.Logger");
+            Class.forName("org.apache.log4j.Logger");
             LogConfigurator.configure(settings);
         } catch (ClassNotFoundException e) {
             // no log4j
@@ -242,41 +222,36 @@ public class Bootstrap {
         }
     }
 
-    public static void main(String[] args) {
+    public static void main(String[] args) throws Throwable {
+        BootstrapCLIParser bootstrapCLIParser = new BootstrapCLIParser();
+        CliTool.ExitStatus status = bootstrapCLIParser.execute(args);
+
+        if (CliTool.ExitStatus.OK != status) {
+            System.exit(status.status());
+        }
+
         System.setProperty("es.logger.prefix", "");
         INSTANCE = new Bootstrap();
 
-        boolean foreground = System.getProperty("es.foreground", System.getProperty("es-foreground")) != null;
+        boolean foreground = !"false".equals(System.getProperty("es.foreground", System.getProperty("es-foreground")));
         // handle the wrapper system property, if its a service, don't run as a service
         if (System.getProperty("wrapper.service", "XXX").equalsIgnoreCase("true")) {
             foreground = false;
         }
 
-        String stage = "Settings";
+        Tuple<Settings, Environment> tuple = initialSettings(foreground);
+        Settings settings = tuple.v1();
+        Environment environment = tuple.v2();
 
-        Settings settings = null;
-        Environment environment = null;
-        try {
-            Tuple<Settings, Environment> tuple = initialSettings(foreground);
-            settings = tuple.v1();
-            environment = tuple.v2();
-
-            if (environment.pidFile() != null) {
-                stage = "Pid";
-                PidFile.create(environment.pidFile(), true);
-            }
-
-            stage = "Logging";
-            setupLogging(settings, environment);
-        } catch (Exception e) {
-            String errorMessage = buildErrorMessage(stage, e);
-            sysError(errorMessage, true);
-            System.exit(3);
+        if (environment.pidFile() != null) {
+            PidFile.create(environment.pidFile(), true);
         }
+
+        setupLogging(settings, environment);
 
         if (System.getProperty("es.max-open-files", "false").equals("true")) {
             ESLogger logger = Loggers.getLogger(Bootstrap.class);
-            logger.info("max_open_files [{}]", JmxProcessProbe.getMaxFileDescriptorCount());
+            logger.info("max_open_files [{}]", ProcessProbe.getInstance().getMaxFileDescriptorCount());
         }
 
         // warn if running using the client VM
@@ -285,7 +260,6 @@ public class Bootstrap {
             logger.warn("jvm uses the client vm, make sure to run `java` with the server vm for best performance by adding `-server` to the command line");
         }
 
-        stage = "Initialization";
         try {
             if (!foreground) {
                 Loggers.disableConsoleLogging();
@@ -297,25 +271,27 @@ public class Bootstrap {
 
             INSTANCE.setup(true, settings, environment);
 
-            stage = "Startup";
             INSTANCE.start();
 
             if (!foreground) {
                 closeSysError();
             }
         } catch (Throwable e) {
+            // disable console logging, so user does not see the exception twice (jvm will show it already)
+            if (foreground) {
+                Loggers.disableConsoleLogging();
+            }
             ESLogger logger = Loggers.getLogger(Bootstrap.class);
             if (INSTANCE.node != null) {
                 logger = Loggers.getLogger(Bootstrap.class, INSTANCE.node.settings().get("name"));
             }
-            String errorMessage = buildErrorMessage(stage, e);
-            if (foreground) {
-                sysError(errorMessage, true);
-                Loggers.disableConsoleLogging();
-            }
             logger.error("Exception", e);
+            // re-enable it if appropriate, so they can see any logging during the shutdown process
+            if (foreground) {
+                Loggers.enableConsoleLogging();
+            }
             
-            System.exit(3);
+            throw new StartupError(e);
         }
     }
 
@@ -334,110 +310,6 @@ public class Bootstrap {
         System.err.println(line);
         if (flush) {
             System.err.flush();
-        }
-    }
-
-    private static String buildErrorMessage(String stage, Throwable e) {
-        StringBuilder errorMessage = new StringBuilder("{").append(Version.CURRENT).append("}: ");
-        errorMessage.append(stage).append(" Failed ...\n");
-        if (e instanceof CreationException) {
-            CreationException createException = (CreationException) e;
-            Set<String> seenMessages = newHashSet();
-            int counter = 1;
-            for (Message message : createException.getErrorMessages()) {
-                String detailedMessage;
-                if (message.getCause() == null) {
-                    detailedMessage = message.getMessage();
-                } else {
-                    detailedMessage = ExceptionsHelper.detailedMessage(message.getCause(), true, 0);
-                }
-                if (detailedMessage == null) {
-                    detailedMessage = message.getMessage();
-                }
-                if (seenMessages.contains(detailedMessage)) {
-                    continue;
-                }
-                seenMessages.add(detailedMessage);
-                errorMessage.append("").append(counter++).append(") ").append(detailedMessage);
-            }
-        } else {
-            errorMessage.append("- ").append(ExceptionsHelper.detailedMessage(e, true, 0));
-        }
-        if (Loggers.getLogger(Bootstrap.class).isDebugEnabled()) {
-            errorMessage.append("\n").append(ExceptionsHelper.stackTrace(e));
-        }
-        return errorMessage.toString();
-    }
-    
-    static final String PLUGIN_LIB_PATTERN = "glob:**.{jar,zip}";
-    private static void setupPlugins(Environment environment) throws IOException {
-        ESLogger logger = Loggers.getLogger(Bootstrap.class);
-
-        Path pluginsDirectory = environment.pluginsFile();
-        if (!isAccessibleDirectory(pluginsDirectory, logger)) {
-            return;
-        }
-
-        // note: there's only one classloader here, but Uwe gets upset otherwise.
-        ClassLoader classLoader = Bootstrap.class.getClassLoader();
-        Class<?> classLoaderClass = classLoader.getClass();
-        Method addURL = null;
-        while (!classLoaderClass.equals(Object.class)) {
-            try {
-                addURL = classLoaderClass.getDeclaredMethod("addURL", URL.class);
-                addURL.setAccessible(true);
-                break;
-            } catch (NoSuchMethodException e) {
-                // no method, try the parent
-                classLoaderClass = classLoaderClass.getSuperclass();
-            }
-        }
-
-        if (addURL == null) {
-            logger.debug("failed to find addURL method on classLoader [" + classLoader + "] to add methods");
-            return;
-        }
-
-        try (DirectoryStream<Path> stream = Files.newDirectoryStream(pluginsDirectory)) {
-
-            for (Path plugin : stream) {
-                // We check that subdirs are directories and readable
-                if (!isAccessibleDirectory(plugin, logger)) {
-                    continue;
-                }
-
-                logger.trace("--- adding plugin [{}]", plugin.toAbsolutePath());
-
-                try {
-                    // add the root
-                    addURL.invoke(classLoader, plugin.toUri().toURL());
-                    // gather files to add
-                    List<Path> libFiles = Lists.newArrayList();
-                    libFiles.addAll(Arrays.asList(files(plugin)));
-                    Path libLocation = plugin.resolve("lib");
-                    if (Files.isDirectory(libLocation)) {
-                        libFiles.addAll(Arrays.asList(files(libLocation)));
-                    }
-
-                    PathMatcher matcher = PathUtils.getDefaultFileSystem().getPathMatcher(PLUGIN_LIB_PATTERN);
-
-                    // if there are jars in it, add it as well
-                    for (Path libFile : libFiles) {
-                        if (!matcher.matches(libFile)) {
-                            continue;
-                        }
-                        addURL.invoke(classLoader, libFile.toUri().toURL());
-                    }
-                } catch (Throwable e) {
-                    logger.warn("failed to add plugin [" + plugin + "]", e);
-                }
-            }
-        }
-    }
-
-    private static Path[] files(Path from) throws IOException {
-        try (DirectoryStream<Path> stream = Files.newDirectoryStream(from)) {
-            return Iterators.toArray(stream.iterator(), Path.class);
         }
     }
 }

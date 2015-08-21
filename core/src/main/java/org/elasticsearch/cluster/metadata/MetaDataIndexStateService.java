@@ -32,6 +32,7 @@ import org.elasticsearch.cluster.block.ClusterBlocks;
 import org.elasticsearch.cluster.routing.IndexRoutingTable;
 import org.elasticsearch.cluster.routing.IndexShardRoutingTable;
 import org.elasticsearch.cluster.routing.RoutingTable;
+import org.elasticsearch.cluster.routing.ShardRouting;
 import org.elasticsearch.cluster.routing.allocation.AllocationService;
 import org.elasticsearch.cluster.routing.allocation.RoutingAllocation;
 import org.elasticsearch.common.Priority;
@@ -39,8 +40,7 @@ import org.elasticsearch.common.component.AbstractComponent;
 import org.elasticsearch.common.inject.Inject;
 import org.elasticsearch.common.settings.Settings;
 import org.elasticsearch.index.Index;
-import org.elasticsearch.index.IndexException;
-import org.elasticsearch.indices.IndexMissingException;
+import org.elasticsearch.index.IndexNotFoundException;
 import org.elasticsearch.indices.IndexPrimaryShardNotAllocatedException;
 import org.elasticsearch.rest.RestStatus;
 
@@ -87,14 +87,16 @@ public class MetaDataIndexStateService extends AbstractComponent {
                 for (String index : request.indices()) {
                     IndexMetaData indexMetaData = currentState.metaData().index(index);
                     if (indexMetaData == null) {
-                        throw new IndexMissingException(new Index(index));
+                        throw new IndexNotFoundException(index);
                     }
 
                     if (indexMetaData.state() != IndexMetaData.State.CLOSE) {
                         IndexRoutingTable indexRoutingTable = currentState.routingTable().index(index);
                         for (IndexShardRoutingTable shard : indexRoutingTable) {
-                            if (!shard.primaryAllocatedPostApi()) {
-                                throw new IndexPrimaryShardNotAllocatedException(new Index(index));
+                            for (ShardRouting shardRouting : shard) {
+                                if (shardRouting.primary() == true && shardRouting.allocatedPostIndexCreate() == false) {
+                                    throw new IndexPrimaryShardNotAllocatedException(new Index(index));
+                                }
                             }
                         }
                         indicesToClose.add(index);
@@ -147,7 +149,7 @@ public class MetaDataIndexStateService extends AbstractComponent {
                 for (String index : request.indices()) {
                     IndexMetaData indexMetaData = currentState.metaData().index(index);
                     if (indexMetaData == null) {
-                        throw new IndexMissingException(new Index(index));
+                        throw new IndexNotFoundException(index);
                     }
                     if (indexMetaData.state() != IndexMetaData.State.OPEN) {
                         indicesToOpen.add(index);
@@ -167,11 +169,7 @@ public class MetaDataIndexStateService extends AbstractComponent {
                     IndexMetaData indexMetaData = IndexMetaData.builder(currentState.metaData().index(index)).state(IndexMetaData.State.OPEN).build();
                     // The index might be closed because we couldn't import it due to old incompatible version
                     // We need to check that this index can be upgraded to the current version
-                    try {
-                        indexMetaData = metaDataIndexUpgradeService.upgradeIndexMetaData(indexMetaData);
-                    } catch (Exception ex) {
-                        throw new IndexException(new Index(index), "cannot open the index due to upgrade failure", ex);
-                    }
+                    indexMetaData = metaDataIndexUpgradeService.upgradeIndexMetaData(indexMetaData);
                     mdBuilder.put(indexMetaData, true);
                     blocksBuilder.removeIndexBlock(index, INDEX_CLOSED_BLOCK);
                 }

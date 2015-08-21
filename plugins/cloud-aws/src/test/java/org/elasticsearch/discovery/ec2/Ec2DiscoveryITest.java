@@ -22,9 +22,9 @@ package org.elasticsearch.discovery.ec2;
 
 import org.elasticsearch.cloud.aws.AbstractAwsTest;
 import org.elasticsearch.common.settings.Settings;
-import org.elasticsearch.plugins.PluginsService;
-import org.elasticsearch.test.ElasticsearchIntegrationTest.ClusterScope;
-import org.elasticsearch.test.ElasticsearchIntegrationTest.Scope;
+import org.elasticsearch.plugin.cloud.aws.CloudAwsPlugin;
+import org.elasticsearch.test.ESIntegTestCase.ClusterScope;
+import org.elasticsearch.test.ESIntegTestCase.Scope;
 import org.junit.Test;
 
 import static org.elasticsearch.common.settings.Settings.settingsBuilder;
@@ -40,7 +40,7 @@ public class Ec2DiscoveryITest extends AbstractAwsTest {
     @Test
     public void testStart() {
         Settings nodeSettings = settingsBuilder()
-                .put("plugins." + PluginsService.LOAD_PLUGIN_FROM_CLASSPATH, true)
+                .put("plugin.types", CloudAwsPlugin.class.getName())
                 .put("cloud.enabled", true)
                 .put("discovery.type", "ec2")
                 .build();

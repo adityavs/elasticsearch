@@ -42,7 +42,7 @@ import java.util.Arrays;
 import java.util.Iterator;
 import java.util.List;
 
-public class MultiGetRequest extends ActionRequest<MultiGetRequest> implements Iterable<MultiGetRequest.Item>, CompositeIndicesRequest {
+public class MultiGetRequest extends ActionRequest<MultiGetRequest> implements Iterable<MultiGetRequest.Item>, CompositeIndicesRequest, RealtimeRequest {
 
     /**
      * A single get item.
@@ -319,6 +319,7 @@ public class MultiGetRequest extends ActionRequest<MultiGetRequest> implements I
         return this.realtime == null ? true : this.realtime;
     }
 
+    @Override
     public MultiGetRequest realtime(Boolean realtime) {
         this.realtime = realtime;
         return this;
@@ -418,7 +419,7 @@ public class MultiGetRequest extends ActionRequest<MultiGetRequest> implements I
                         } else if (token == XContentParser.Token.VALUE_STRING) {
                             fetchSourceContext = new FetchSourceContext(new String[]{parser.text()});
                         } else {
-                            throw new ElasticsearchParseException("illegal type for _source: [" + token + "]");
+                            throw new ElasticsearchParseException("illegal type for _source: [{}]", token);
                         }
                     }
                 } else if (token == XContentParser.Token.START_ARRAY) {
@@ -447,7 +448,7 @@ public class MultiGetRequest extends ActionRequest<MultiGetRequest> implements I
                                 } else if ("excludes".equals(currentFieldName) || "exclude".equals(currentFieldName)) {
                                     currentList = excludes != null ? excludes : (excludes = new ArrayList<>(2));
                                 } else {
-                                    throw new ElasticsearchParseException("Source definition may not contain " + parser.text());
+                                    throw new ElasticsearchParseException("source definition may not contain [{}]", parser.text());
                                 }
                             } else if (token == XContentParser.Token.START_ARRAY) {
                                 while ((token = parser.nextToken()) != XContentParser.Token.END_ARRAY) {

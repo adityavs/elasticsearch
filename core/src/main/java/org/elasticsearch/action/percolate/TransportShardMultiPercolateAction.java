@@ -21,6 +21,7 @@ package org.elasticsearch.action.percolate;
 
 import org.elasticsearch.ElasticsearchException;
 import org.elasticsearch.ExceptionsHelper;
+import org.elasticsearch.action.ActionRequestValidationException;
 import org.elasticsearch.action.ActionResponse;
 import org.elasticsearch.action.IndicesRequest;
 import org.elasticsearch.action.OriginalIndices;
@@ -30,6 +31,7 @@ import org.elasticsearch.action.support.single.shard.SingleShardRequest;
 import org.elasticsearch.action.support.single.shard.TransportSingleShardAction;
 import org.elasticsearch.cluster.ClusterService;
 import org.elasticsearch.cluster.ClusterState;
+import org.elasticsearch.cluster.metadata.IndexNameExpressionResolver;
 import org.elasticsearch.cluster.routing.ShardIterator;
 import org.elasticsearch.common.inject.Inject;
 import org.elasticsearch.common.io.stream.StreamInput;
@@ -56,8 +58,10 @@ public class TransportShardMultiPercolateAction extends TransportSingleShardActi
     private static final String ACTION_NAME = MultiPercolateAction.NAME + "[shard]";
 
     @Inject
-    public TransportShardMultiPercolateAction(Settings settings, ThreadPool threadPool, ClusterService clusterService, TransportService transportService, PercolatorService percolatorService, ActionFilters actionFilters) {
-        super(settings, ACTION_NAME, threadPool, clusterService, transportService, actionFilters,
+    public TransportShardMultiPercolateAction(Settings settings, ThreadPool threadPool, ClusterService clusterService,
+                                              TransportService transportService, PercolatorService percolatorService,
+                                              ActionFilters actionFilters, IndexNameExpressionResolver indexNameExpressionResolver) {
+        super(settings, ACTION_NAME, threadPool, clusterService, transportService, actionFilters, indexNameExpressionResolver,
                 Request.class, ThreadPool.Names.PERCOLATE);
         this.percolatorService = percolatorService;
     }
@@ -73,7 +77,7 @@ public class TransportShardMultiPercolateAction extends TransportSingleShardActi
     }
 
     @Override
-    protected boolean resolveIndex() {
+    protected boolean resolveIndex(Request request) {
         return false;
     }
 
@@ -122,6 +126,11 @@ public class TransportShardMultiPercolateAction extends TransportSingleShardActi
             this.shardId = shardId;
             this.preference = preference;
             this.items = new ArrayList<>();
+        }
+
+        @Override
+        public ActionRequestValidationException validate() {
+            return super.validateNonNullIndex();
         }
 
         @Override

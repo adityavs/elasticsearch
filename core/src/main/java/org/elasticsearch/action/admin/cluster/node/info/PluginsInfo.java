@@ -25,9 +25,12 @@ import org.elasticsearch.common.io.stream.Streamable;
 import org.elasticsearch.common.xcontent.ToXContent;
 import org.elasticsearch.common.xcontent.XContentBuilder;
 import org.elasticsearch.common.xcontent.XContentBuilderString;
+import org.elasticsearch.plugins.PluginInfo;
 
 import java.io.IOException;
 import java.util.ArrayList;
+import java.util.Collections;
+import java.util.Comparator;
 import java.util.List;
 
 public class PluginsInfo implements Streamable, ToXContent {
@@ -45,7 +48,17 @@ public class PluginsInfo implements Streamable, ToXContent {
         infos = new ArrayList<>(size);
     }
 
+    /**
+     * @return an ordered list based on plugins name
+     */
     public List<PluginInfo> getInfos() {
+        Collections.sort(infos, new Comparator<PluginInfo>() {
+            @Override
+            public int compare(final PluginInfo o1, final PluginInfo o2) {
+                return o1.getName().compareTo(o2.getName());
+            }
+        });
+
         return infos;
     }
 
@@ -63,14 +76,14 @@ public class PluginsInfo implements Streamable, ToXContent {
     public void readFrom(StreamInput in) throws IOException {
         int plugins_size = in.readInt();
         for (int i = 0; i < plugins_size; i++) {
-            infos.add(PluginInfo.readPluginInfo(in));
+            infos.add(PluginInfo.readFromStream(in));
         }
     }
 
     @Override
     public void writeTo(StreamOutput out) throws IOException {
         out.writeInt(infos.size());
-        for (PluginInfo plugin : infos) {
+        for (PluginInfo plugin : getInfos()) {
             plugin.writeTo(out);
         }
     }
@@ -78,7 +91,7 @@ public class PluginsInfo implements Streamable, ToXContent {
     @Override
     public XContentBuilder toXContent(XContentBuilder builder, Params params) throws IOException {
         builder.startArray(Fields.PLUGINS);
-        for (PluginInfo pluginInfo : infos) {
+        for (PluginInfo pluginInfo : getInfos()) {
             pluginInfo.toXContent(builder, params);
         }
         builder.endArray();

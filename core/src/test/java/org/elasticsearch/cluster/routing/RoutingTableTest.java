@@ -28,8 +28,8 @@ import org.elasticsearch.cluster.node.DiscoveryNodes.Builder;
 import org.elasticsearch.cluster.routing.allocation.AllocationService;
 import org.elasticsearch.cluster.routing.allocation.RoutingAllocation;
 import org.elasticsearch.common.settings.Settings;
-import org.elasticsearch.indices.IndexMissingException;
-import org.elasticsearch.test.ElasticsearchAllocationTestCase;
+import org.elasticsearch.index.IndexNotFoundException;
+import org.elasticsearch.test.ESAllocationTestCase;
 import org.junit.Before;
 import org.junit.Test;
 
@@ -38,7 +38,7 @@ import static org.elasticsearch.common.settings.Settings.settingsBuilder;
 import static org.hamcrest.Matchers.is;
 import static org.hamcrest.Matchers.nullValue;
 
-public class RoutingTableTest extends ElasticsearchAllocationTestCase {
+public class RoutingTableTest extends ESAllocationTestCase {
 
     private static final String TEST_INDEX_1 = "test1";
     private static final String TEST_INDEX_2 = "test2";
@@ -95,7 +95,7 @@ public class RoutingTableTest extends ElasticsearchAllocationTestCase {
     private void startInitializingShards(String index) {
         this.clusterState = ClusterState.builder(clusterState).routingTable(this.testRoutingTable).build();
         logger.info("start primary shards for index " + index);
-        RoutingAllocation.Result rerouteResult = ALLOCATION_SERVICE.applyStartedShards(this.clusterState, this.clusterState.routingNodes().shardsWithState(index, INITIALIZING));
+        RoutingAllocation.Result rerouteResult = ALLOCATION_SERVICE.applyStartedShards(this.clusterState, this.clusterState.getRoutingNodes().shardsWithState(index, INITIALIZING));
         this.clusterState = ClusterState.builder(clusterState).routingTable(rerouteResult.routingTable()).build();
         this.testRoutingTable = rerouteResult.routingTable();
     }
@@ -116,7 +116,7 @@ public class RoutingTableTest extends ElasticsearchAllocationTestCase {
         try {
             assertThat(this.testRoutingTable.allShards("not_existing").size(), is(0));
             fail("Exception expected when calling allShards() with non existing index name");
-        } catch (IndexMissingException e) {
+        } catch (IndexNotFoundException e) {
             // expected
         }
     }
@@ -191,7 +191,7 @@ public class RoutingTableTest extends ElasticsearchAllocationTestCase {
         try {
             this.testRoutingTable.activePrimaryShardsGrouped(new String[]{TEST_INDEX_1, "not_exists"}, true);
             fail("Calling with non-existing index name should raise IndexMissingException");
-        } catch (IndexMissingException e) {
+        } catch (IndexNotFoundException e) {
             // expected
         }
     }
@@ -220,7 +220,7 @@ public class RoutingTableTest extends ElasticsearchAllocationTestCase {
 
         try {
             this.testRoutingTable.allActiveShardsGrouped(new String[]{TEST_INDEX_1, "not_exists"}, true);
-        } catch (IndexMissingException e) {
+        } catch (IndexNotFoundException e) {
             fail("Calling with non-existing index should be ignored at the moment");
         }
     }
@@ -239,7 +239,7 @@ public class RoutingTableTest extends ElasticsearchAllocationTestCase {
 
         try {
             this.testRoutingTable.allAssignedShardsGrouped(new String[]{TEST_INDEX_1, "not_exists"}, false);
-        } catch (IndexMissingException e) {
+        } catch (IndexNotFoundException e) {
             fail("Calling with non-existing index should be ignored at the moment");
         }
     }

@@ -175,11 +175,11 @@ public class QueryStringQueryParser implements QueryParser {
                 } else if ("fuzzy_max_expansions".equals(currentFieldName) || "fuzzyMaxExpansions".equals(currentFieldName)) {
                     qpSettings.fuzzyMaxExpansions(parser.intValue());
                 } else if ("fuzzy_rewrite".equals(currentFieldName) || "fuzzyRewrite".equals(currentFieldName)) {
-                    qpSettings.fuzzyRewriteMethod(QueryParsers.parseRewriteMethod(parser.textOrNull()));
+                    qpSettings.fuzzyRewriteMethod(QueryParsers.parseRewriteMethod(parseContext.parseFieldMatcher(), parser.textOrNull()));
                 } else if ("phrase_slop".equals(currentFieldName) || "phraseSlop".equals(currentFieldName)) {
                     qpSettings.phraseSlop(parser.intValue());
-                } else if (FUZZINESS.match(currentFieldName, parseContext.parseFlags())) {
-                    qpSettings.fuzzyMinSim(Fuzziness.parse(parser).asSimilarity());
+                } else if (parseContext.parseFieldMatcher().match(currentFieldName, FUZZINESS)) {
+                    qpSettings.setFuzziness(Fuzziness.parse(parser));
                 } else if ("boost".equals(currentFieldName)) {
                     qpSettings.boost(parser.floatValue());
                 } else if ("tie_breaker".equals(currentFieldName) || "tieBreaker".equals(currentFieldName)) {
@@ -187,7 +187,7 @@ public class QueryStringQueryParser implements QueryParser {
                 } else if ("analyze_wildcard".equals(currentFieldName) || "analyzeWildcard".equals(currentFieldName)) {
                     qpSettings.analyzeWildcard(parser.booleanValue());
                 } else if ("rewrite".equals(currentFieldName)) {
-                    qpSettings.rewriteMethod(QueryParsers.parseRewriteMethod(parser.textOrNull()));
+                    qpSettings.rewriteMethod(QueryParsers.parseRewriteMethod(parseContext.parseFieldMatcher(), parser.textOrNull()));
                 } else if ("minimum_should_match".equals(currentFieldName) || "minimumShouldMatch".equals(currentFieldName)) {
                     qpSettings.minimumShouldMatch(parser.textOrNull());
                 } else if ("quote_field_suffix".equals(currentFieldName) || "quoteFieldSuffix".equals(currentFieldName)) {

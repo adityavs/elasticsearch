@@ -26,7 +26,7 @@ import org.elasticsearch.cluster.metadata.MetaData;
 import org.elasticsearch.cluster.node.DiscoveryNodes;
 import org.elasticsearch.cluster.routing.ShardRouting;
 import org.elasticsearch.cluster.routing.RoutingTable;
-import org.elasticsearch.test.ElasticsearchAllocationTestCase;
+import org.elasticsearch.test.ESAllocationTestCase;
 import org.junit.Test;
 
 import static org.elasticsearch.cluster.routing.ShardRoutingState.*;
@@ -35,7 +35,7 @@ import static org.hamcrest.Matchers.equalTo;
 
 /**
  */
-public class PreferLocalPrimariesToRelocatingPrimariesTests extends ElasticsearchAllocationTestCase {
+public class PreferLocalPrimariesToRelocatingPrimariesTests extends ESAllocationTestCase {
     @Test
     public void testPreferLocalPrimaryAllocationOverFiltered() {
         int concurrentRecoveries = randomIntBetween(1, 10);
@@ -71,8 +71,8 @@ public class PreferLocalPrimariesToRelocatingPrimariesTests extends Elasticsearc
         routingTable = strategy.reroute(clusterState).routingTable();
         clusterState = ClusterState.builder(clusterState).routingTable(routingTable).build();
 
-        while (!clusterState.routingNodes().shardsWithState(INITIALIZING).isEmpty()) {
-            routingTable = strategy.applyStartedShards(clusterState, clusterState.routingNodes().shardsWithState(INITIALIZING)).routingTable();
+        while (!clusterState.getRoutingNodes().shardsWithState(INITIALIZING).isEmpty()) {
+            routingTable = strategy.applyStartedShards(clusterState, clusterState.getRoutingNodes().shardsWithState(INITIALIZING)).routingTable();
             clusterState = ClusterState.builder(clusterState).routingTable(routingTable).build();
         }
 
@@ -95,8 +95,8 @@ public class PreferLocalPrimariesToRelocatingPrimariesTests extends Elasticsearc
         clusterState = ClusterState.builder(clusterState).routingTable(routingTable).build();
 
         logger.info("[{}] primaries should be still started but [{}] other primaries should be unassigned", numberOfShards, numberOfShards);
-        assertThat(clusterState.routingNodes().shardsWithState(STARTED).size(), equalTo(numberOfShards));
-        assertThat(clusterState.routingNodes().shardsWithState(INITIALIZING).size(), equalTo(0));
+        assertThat(clusterState.getRoutingNodes().shardsWithState(STARTED).size(), equalTo(numberOfShards));
+        assertThat(clusterState.getRoutingNodes().shardsWithState(INITIALIZING).size(), equalTo(0));
         assertThat(clusterState.routingTable().shardsWithState(UNASSIGNED).size(), equalTo(numberOfShards));
 
         logger.info("start node back up");
@@ -105,17 +105,17 @@ public class PreferLocalPrimariesToRelocatingPrimariesTests extends Elasticsearc
         routingTable = strategy.reroute(clusterState).routingTable();
         clusterState = ClusterState.builder(clusterState).routingTable(routingTable).build();
 
-        while (clusterState.routingNodes().shardsWithState(STARTED).size() < totalNumberOfShards) {
+        while (clusterState.getRoutingNodes().shardsWithState(STARTED).size() < totalNumberOfShards) {
             int localInitializations = 0;
             int relocatingInitializations = 0;
-            for (ShardRouting routing : clusterState.routingNodes().shardsWithState(INITIALIZING)) {
+            for (ShardRouting routing : clusterState.getRoutingNodes().shardsWithState(INITIALIZING)) {
                 if (routing.relocatingNodeId() == null) {
                     localInitializations++;
                 } else {
                     relocatingInitializations++;
                 }
             }
-            int needToInitialize = totalNumberOfShards - clusterState.routingNodes().shardsWithState(STARTED).size() - clusterState.routingNodes().shardsWithState(RELOCATING).size();
+            int needToInitialize = totalNumberOfShards - clusterState.getRoutingNodes().shardsWithState(STARTED).size() - clusterState.getRoutingNodes().shardsWithState(RELOCATING).size();
             logger.info("local initializations: [{}], relocating: [{}], need to initialize: {}", localInitializations, relocatingInitializations, needToInitialize);
             assertThat(localInitializations, equalTo(Math.min(primaryRecoveries, needToInitialize)));
             clusterState = startRandomInitializingShard(clusterState, strategy);

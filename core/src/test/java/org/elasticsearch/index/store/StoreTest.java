@@ -46,7 +46,7 @@ import org.elasticsearch.index.shard.ShardId;
 import org.elasticsearch.index.translog.Translog;
 import org.elasticsearch.indices.store.TransportNodesListShardStoreMetaData;
 import org.elasticsearch.test.DummyShardLock;
-import org.elasticsearch.test.ElasticsearchTestCase;
+import org.elasticsearch.test.ESTestCase;
 import org.hamcrest.Matchers;
 import org.junit.Test;
 
@@ -65,7 +65,7 @@ import static org.elasticsearch.common.settings.Settings.Builder.EMPTY_SETTINGS;
 import static org.elasticsearch.test.VersionUtils.randomVersion;
 import static org.hamcrest.Matchers.*;
 
-public class StoreTest extends ElasticsearchTestCase {
+public class StoreTest extends ESTestCase {
 
     @Test
     public void testRefCount() throws IOException {
@@ -655,7 +655,7 @@ public class StoreTest extends ElasticsearchTestCase {
         IndexOutput output = dir.createOutput(fileOut, IOContext.DEFAULT);
         long len = input.length();
         byte[] b = new byte[1024];
-        long broken = randomInt((int) len);
+        long broken = randomInt((int) len-1);
         long pos = 0;
         while (pos < len) {
             int min = (int) Math.min(input.length() - pos, b.length);

@@ -28,7 +28,7 @@ import org.elasticsearch.cluster.routing.RoutingNodes;
 import org.elasticsearch.cluster.routing.RoutingTable;
 import org.elasticsearch.common.logging.ESLogger;
 import org.elasticsearch.common.logging.Loggers;
-import org.elasticsearch.test.ElasticsearchAllocationTestCase;
+import org.elasticsearch.test.ESAllocationTestCase;
 import org.junit.Test;
 
 import static org.elasticsearch.cluster.routing.ShardRoutingState.*;
@@ -38,7 +38,7 @@ import static org.hamcrest.Matchers.*;
 /**
  *
  */
-public class ReplicaAllocatedAfterPrimaryTests extends ElasticsearchAllocationTestCase {
+public class ReplicaAllocatedAfterPrimaryTests extends ESAllocationTestCase {
 
     private final ESLogger logger = Loggers.getLogger(ReplicaAllocatedAfterPrimaryTests.class);
 
@@ -86,7 +86,7 @@ public class ReplicaAllocatedAfterPrimaryTests extends ElasticsearchAllocationTe
         assertThat(routingTable.index("test").shard(0).replicaShards().get(0).currentNodeId(), nullValue());
 
         logger.info("Start all the primary shards");
-        RoutingNodes routingNodes = clusterState.routingNodes();
+        RoutingNodes routingNodes = clusterState.getRoutingNodes();
         prevRoutingTable = routingTable;
         routingTable = strategy.applyStartedShards(clusterState, routingNodes.node(nodeHoldingPrimary).shardsWithState(INITIALIZING)).routingTable();
         clusterState = ClusterState.builder(clusterState).routingTable(routingTable).build();

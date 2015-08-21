@@ -29,6 +29,7 @@ import org.elasticsearch.cluster.ClusterState;
 import org.elasticsearch.cluster.block.ClusterBlockException;
 import org.elasticsearch.cluster.block.ClusterBlockLevel;
 import org.elasticsearch.cluster.block.ClusterBlocks;
+import org.elasticsearch.cluster.metadata.IndexNameExpressionResolver;
 import org.elasticsearch.cluster.metadata.MetaData;
 import org.elasticsearch.cluster.node.DiscoveryNode;
 import org.elasticsearch.cluster.routing.allocation.AllocationService;
@@ -57,8 +58,9 @@ public class TransportClusterUpdateSettingsAction extends TransportMasterNodeAct
 
     @Inject
     public TransportClusterUpdateSettingsAction(Settings settings, TransportService transportService, ClusterService clusterService, ThreadPool threadPool,
-                                                AllocationService allocationService, @ClusterDynamicSettings DynamicSettings dynamicSettings, ActionFilters actionFilters) {
-        super(settings, ClusterUpdateSettingsAction.NAME, transportService, clusterService, threadPool, actionFilters, ClusterUpdateSettingsRequest.class);
+                                                AllocationService allocationService, @ClusterDynamicSettings DynamicSettings dynamicSettings,
+                                                ActionFilters actionFilters, IndexNameExpressionResolver indexNameExpressionResolver) {
+        super(settings, ClusterUpdateSettingsAction.NAME, transportService, clusterService, threadPool, actionFilters, indexNameExpressionResolver, ClusterUpdateSettingsRequest.class);
         this.allocationService = allocationService;
         this.dynamicSettings = dynamicSettings;
     }
@@ -181,7 +183,7 @@ public class TransportClusterUpdateSettingsAction extends TransportMasterNodeAct
                 transientSettings.put(currentState.metaData().transientSettings());
                 for (Map.Entry<String, String> entry : request.transientSettings().getAsMap().entrySet()) {
                     if (dynamicSettings.isDynamicOrLoggingSetting(entry.getKey())) {
-                        String error = dynamicSettings.validateDynamicSetting(entry.getKey(), entry.getValue());
+                        String error = dynamicSettings.validateDynamicSetting(entry.getKey(), entry.getValue(), clusterService.state());
                         if (error == null) {
                             transientSettings.put(entry.getKey(), entry.getValue());
                             transientUpdates.put(entry.getKey(), entry.getValue());
@@ -198,7 +200,7 @@ public class TransportClusterUpdateSettingsAction extends TransportMasterNodeAct
                 persistentSettings.put(currentState.metaData().persistentSettings());
                 for (Map.Entry<String, String> entry : request.persistentSettings().getAsMap().entrySet()) {
                     if (dynamicSettings.isDynamicOrLoggingSetting(entry.getKey())) {
-                        String error = dynamicSettings.validateDynamicSetting(entry.getKey(), entry.getValue());
+                        String error = dynamicSettings.validateDynamicSetting(entry.getKey(), entry.getValue(), clusterService.state());
                         if (error == null) {
                             persistentSettings.put(entry.getKey(), entry.getValue());
                             persistentUpdates.put(entry.getKey(), entry.getValue());

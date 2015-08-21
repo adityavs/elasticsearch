@@ -21,7 +21,6 @@ package org.elasticsearch.script;
 
 import com.google.common.collect.ImmutableSet;
 import com.google.common.collect.Lists;
-
 import org.elasticsearch.common.Nullable;
 import org.elasticsearch.common.inject.Injector;
 import org.elasticsearch.common.inject.ModulesBuilder;
@@ -30,7 +29,7 @@ import org.elasticsearch.common.settings.SettingsModule;
 import org.elasticsearch.env.Environment;
 import org.elasticsearch.env.EnvironmentModule;
 import org.elasticsearch.script.ScriptService.ScriptType;
-import org.elasticsearch.test.ElasticsearchTestCase;
+import org.elasticsearch.test.ESTestCase;
 import org.elasticsearch.threadpool.ThreadPool;
 import org.elasticsearch.threadpool.ThreadPoolModule;
 import org.elasticsearch.watcher.ResourceWatcherService;
@@ -44,20 +43,21 @@ import java.util.Set;
 import static org.hamcrest.Matchers.equalTo;
 import static org.hamcrest.Matchers.notNullValue;
 
-public class NativeScriptTests extends ElasticsearchTestCase {
+public class NativeScriptTests extends ESTestCase {
 
     @Test
     public void testNativeScript() throws InterruptedException {
         Settings settings = Settings.settingsBuilder()
-                .put("script.native.my.type", MyNativeScriptFactory.class.getName())
                 .put("name", "testNativeScript")
                 .put("path.home", createTempDir())
                 .build();
+        ScriptModule scriptModule = new ScriptModule(settings);
+        scriptModule.registerScript("my", MyNativeScriptFactory.class);
         Injector injector = new ModulesBuilder().add(
                 new EnvironmentModule(new Environment(settings)),
                 new ThreadPoolModule(new ThreadPool(settings)),
                 new SettingsModule(settings),
-                new ScriptModule(settings)).createInjector();
+                scriptModule).createInjector();
 
         ScriptService scriptService = injector.getInstance(ScriptService.class);
 
@@ -96,6 +96,11 @@ public class NativeScriptTests extends ElasticsearchTestCase {
         @Override
         public ExecutableScript newScript(@Nullable Map<String, Object> params) {
             return new MyScript();
+        }
+
+        @Override
+        public boolean needsScores() {
+            return false;
         }
     }
 

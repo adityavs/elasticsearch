@@ -57,7 +57,16 @@ final class Security {
         Policy.setPolicy(new ESPolicy(createPermissions(environment)));
 
         // enable security manager
-        System.setSecurityManager(new SecurityManager());
+        System.setSecurityManager(new SecurityManager() {
+            // we disable this completely, because its granted otherwise:
+            // 'Note: The "exitVM.*" permission is automatically granted to
+            // all code loaded from the application class path, thus enabling
+            // applications to terminate themselves.'
+            @Override
+            public void checkExit(int status) {
+                throw new SecurityException("exit(" + status + ") not allowed by system policy");
+            }
+        });
 
         // do some basic tests
         selfTest();
@@ -87,11 +96,9 @@ final class Security {
                 for (Map.Entry<Pattern,String> e : SPECIAL_JARS.entrySet()) {
                     if (e.getKey().matcher(url.getPath()).matches()) {
                         String prop = e.getValue();
-                        // TODO: we need to fix plugins to not include duplicate e.g. lucene-core jars,
-                        // to add back this safety check! see https://github.com/elastic/elasticsearch/issues/11647
-                        // if (System.getProperty(prop) != null) {
-                        //    throw new IllegalStateException("property: " + prop + " is unexpectedly set: " + System.getProperty(prop));
-                        //}
+                        if (System.getProperty(prop) != null) {
+                            throw new IllegalStateException("property: " + prop + " is unexpectedly set: " + System.getProperty(prop));
+                        }
                         System.setProperty(prop, url.toString());
                     }
                 }
@@ -109,14 +116,19 @@ final class Security {
 
     /** returns dynamic Permissions to configured paths */
     static Permissions createPermissions(Environment environment) throws IOException {
-        // TODO: improve test infra so we can reduce permissions where read/write
-        // is not really needed...
         Permissions policy = new Permissions();
+        // read-only dirs
+        addPath(policy, environment.binFile(), "read,readlink");
+        addPath(policy, environment.libFile(), "read,readlink");
+        addPath(policy, environment.pluginsFile(), "read,readlink");
+        addPath(policy, environment.configFile(), "read,readlink");
+        addPath(policy, environment.scriptsFile(), "read,readlink");
+        // read-write dirs
         addPath(policy, environment.tmpFile(), "read,readlink,write,delete");
-        addPath(policy, environment.homeFile(), "read,readlink,write,delete");
-        addPath(policy, environment.configFile(), "read,readlink,write,delete");
         addPath(policy, environment.logsFile(), "read,readlink,write,delete");
-        addPath(policy, environment.pluginsFile(), "read,readlink,write,delete");
+        if (environment.sharedDataFile() != null) {
+            addPath(policy, environment.sharedDataFile(), "read,readlink,write,delete");
+        }
         for (Path path : environment.dataFiles()) {
             addPath(policy, path, "read,readlink,write,delete");
         }
@@ -127,7 +139,8 @@ final class Security {
             addPath(policy, path, "read,readlink,write,delete");
         }
         if (environment.pidFile() != null) {
-            addPath(policy, environment.pidFile().getParent(), "read,readlink,write,delete");
+            // we just need permission to remove the file if its elsewhere.
+            policy.add(new FilePermission(environment.pidFile().toString(), "delete"));
         }
         return policy;
     }

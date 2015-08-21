@@ -19,18 +19,19 @@
 
 package org.elasticsearch;
 
-import com.google.common.collect.ImmutableMap;
-import com.google.common.collect.Lists;
-import com.google.common.collect.Maps;
 import org.elasticsearch.common.Strings;
-import org.elasticsearch.common.collect.Tuple;
+import org.elasticsearch.common.io.stream.NotSerializableExceptionWrapper;
 import org.elasticsearch.common.io.stream.StreamInput;
 import org.elasticsearch.common.io.stream.StreamOutput;
-import org.elasticsearch.common.io.stream.NotSerializableExceptionWrapper;
+import org.elasticsearch.common.logging.support.LoggerMessageFormat;
 import org.elasticsearch.common.xcontent.ToXContent;
 import org.elasticsearch.common.xcontent.XContentBuilder;
-import org.elasticsearch.rest.HasRestHeaders;
+import org.elasticsearch.index.Index;
+import org.elasticsearch.index.IndexNotFoundException;
+import org.elasticsearch.index.shard.ShardId;
+import org.elasticsearch.index.shard.ShardNotFoundException;
 import org.elasticsearch.rest.RestStatus;
+import org.elasticsearch.rest.action.admin.indices.alias.delete.AliasesNotFoundException;
 
 import java.io.IOException;
 import java.lang.reflect.Constructor;
@@ -42,32 +43,91 @@ import java.util.*;
  */
 public class ElasticsearchException extends RuntimeException implements ToXContent {
 
-    public static final String REST_EXCEPTION_SKIP_CAUSE = "rest.exception.skip_cause";
+    public static final String REST_EXCEPTION_SKIP_CAUSE = "rest.exception.cause.skip";
+    public static final String REST_EXCEPTION_SKIP_STACK_TRACE = "rest.exception.stacktrace.skip";
+    public static final boolean REST_EXCEPTION_SKIP_STACK_TRACE_DEFAULT = true;
+    public static final boolean REST_EXCEPTION_SKIP_CAUSE_DEFAULT = false;
+    private static final String INDEX_HEADER_KEY = "es.index";
+    private static final String SHARD_HEADER_KEY = "es.shard";
+    private static final String RESOURCE_HEADER_TYPE_KEY = "es.resource.type";
+    private static final String RESOURCE_HEADER_ID_KEY = "es.resource.id";
+
     private static final Map<String, Constructor<? extends ElasticsearchException>> MAPPING;
+    private final Map<String, List<String>> headers = new HashMap<>();
 
     /**
      * Construct a <code>ElasticsearchException</code> with the specified detail message.
      *
+     * The message can be parameterized using {@code {}} as placeholders for the given
+     * arguments
+     *
      * @param msg the detail message
+     * @param args the arguments for the message
      */
-    public ElasticsearchException(String msg) {
-        super(msg);
+    public ElasticsearchException(String msg, Object... args) {
+        super(LoggerMessageFormat.format(msg, args));
     }
 
     /**
      * Construct a <code>ElasticsearchException</code> with the specified detail message
      * and nested exception.
      *
+     * The message can be parameterized using {@code {}} as placeholders for the given
+     * arguments
+     *
      * @param msg   the detail message
      * @param cause the nested exception
+     * @param args  the arguments for the message
      */
-    public ElasticsearchException(String msg, Throwable cause) {
-        super(msg, cause);
+    public ElasticsearchException(String msg, Throwable cause, Object... args) {
+        super(LoggerMessageFormat.format(msg, args), cause);
     }
 
     public ElasticsearchException(StreamInput in) throws IOException {
         super(in.readOptionalString(), in.readThrowable());
         readStackTrace(this, in);
+        int numKeys = in.readVInt();
+        for (int i = 0; i < numKeys; i++) {
+            final String key = in.readString();
+            final int numValues = in.readVInt();
+            final ArrayList<String> values = new ArrayList<>(numValues);
+            for (int j = 0; j < numValues; j++) {
+                values.add(in.readString());
+            }
+            headers.put(key, values);
+        }
+    }
+
+    /**
+     * Adds a new header with the given key.
+     * This method will replace existing header if a header with the same key already exists
+     */
+    public void addHeader(String key, String... value) {
+        this.headers.put(key, Arrays.asList(value));
+    }
+
+    /**
+     * Adds a new header with the given key.
+     * This method will replace existing header if a header with the same key already exists
+     */
+    public void addHeader(String key, List<String> value) {
+        this.headers.put(key, value);
+    }
+
+
+    /**
+     * Returns a set of all header keys on this exception
+     */
+    public Set<String> getHeaderKeys() {
+        return headers.keySet();
+    }
+
+    /**
+     * Returns the list of header values for the given key or {@code null} if not header for the
+     * given key exists.
+     */
+    public List<String> getHeader(String key) {
+        return headers.get(key);
     }
 
     /**
@@ -164,6 +224,14 @@ public class ElasticsearchException extends RuntimeException implements ToXConte
         out.writeOptionalString(this.getMessage());
         out.writeThrowable(this.getCause());
         writeStackTraces(this, out);
+        out.writeVInt(headers.size());
+        for (Map.Entry<String, List<String>> entry : headers.entrySet()) {
+            out.writeString(entry.getKey());
+            out.writeVInt(entry.getValue().size());
+            for (String v : entry.getValue()) {
+                out.writeString(v);
+            }
+        }
     }
 
     public static ElasticsearchException readException(StreamInput input, String name) throws IOException {
@@ -189,82 +257,25 @@ public class ElasticsearchException extends RuntimeException implements ToXConte
         return MAPPING.keySet();
     }
 
-    /**
-     * A base class for exceptions that should carry rest headers
-     */
-    @SuppressWarnings("unchecked")
-    public static class WithRestHeadersException extends ElasticsearchException implements HasRestHeaders {
-
-        private final Map<String, List<String>> headers;
-
-        public WithRestHeadersException(String msg, Tuple<String, String[]>... headers) {
-            super(msg);
-            this.headers = headers(headers);
-        }
-
-        public WithRestHeadersException(StreamInput in) throws IOException {
-            super(in);
-            int numKeys = in.readVInt();
-            ImmutableMap.Builder<String, List<String>> builder = ImmutableMap.builder();
-            for (int i = 0; i < numKeys; i++) {
-                final String key = in.readString();
-                final int numValues = in.readVInt();
-                final ArrayList<String> headers = new ArrayList<>(numValues);
-                for (int j = 0; j < numValues; j++) {
-                    headers.add(in.readString());
-                }
-                builder.put(key, headers);
-            }
-            headers = builder.build();
-        }
-
-        @Override
-        public void writeTo(StreamOutput out) throws IOException {
-            super.writeTo(out);
-            out.writeVInt(headers.size());
-            for (Map.Entry<String, List<String>> entry : headers.entrySet()) {
-                out.writeString(entry.getKey());
-                out.writeVInt(entry.getValue().size());
-                for (String v : entry.getValue()) {
-                    out.writeString(v);
-                }
-            }
-        }
-
-        @Override
-        public Map<String, List<String>> getHeaders() {
-            return headers;
-        }
-
-        protected static Tuple<String, String[]> header(String name, String... values) {
-            return Tuple.tuple(name, values);
-        }
-
-        private static Map<String, List<String>> headers(Tuple<String, String[]>... headers) {
-            Map<String, List<String>> map = Maps.newHashMap();
-            for (Tuple<String, String[]> header : headers) {
-                List<String> list = map.get(header.v1());
-                if (list == null) {
-                    list = Lists.newArrayList(header.v2());
-                    map.put(header.v1(), list);
-                } else {
-                    for (String value : header.v2()) {
-                        list.add(value);
-                    }
-                }
-            }
-            return ImmutableMap.copyOf(map);
-        }
-    }
-
     @Override
     public XContentBuilder toXContent(XContentBuilder builder, Params params) throws IOException {
-        if (this instanceof ElasticsearchWrapperException) {
+        Throwable ex = ExceptionsHelper.unwrapCause(this);
+        if (ex != this) {
             toXContent(builder, params, this);
         } else {
             builder.field("type", getExceptionName());
             builder.field("reason", getMessage());
+            for (String key : headers.keySet()) {
+                if (key.startsWith("es.")) {
+                    List<String> values = headers.get(key);
+                    xContentHeader(builder, key.substring("es.".length()), values);
+                }
+            }
             innerToXContent(builder, params);
+            renderHeader(builder, params);
+            if (params.paramAsBoolean(REST_EXCEPTION_SKIP_STACK_TRACE, REST_EXCEPTION_SKIP_STACK_TRACE_DEFAULT) == false) {
+                builder.field("stack_trace", ExceptionsHelper.stackTrace(this));
+            }
         }
         return builder;
     }
@@ -281,11 +292,43 @@ public class ElasticsearchException extends RuntimeException implements ToXConte
      */
     protected final void causeToXContent(XContentBuilder builder, Params params) throws IOException {
         final Throwable cause = getCause();
-        if (cause != null && params.paramAsBoolean(REST_EXCEPTION_SKIP_CAUSE, false) == false) {
+        if (cause != null && params.paramAsBoolean(REST_EXCEPTION_SKIP_CAUSE, REST_EXCEPTION_SKIP_CAUSE_DEFAULT) == false) {
             builder.field("caused_by");
             builder.startObject();
             toXContent(builder, params, cause);
             builder.endObject();
+        }
+    }
+
+    protected final void renderHeader(XContentBuilder builder, Params params) throws IOException {
+        boolean hasHeader = false;
+        for (String key : headers.keySet()) {
+            if (key.startsWith("es.")) {
+                continue;
+            }
+            if (hasHeader == false) {
+                builder.startObject("header");
+                hasHeader = true;
+            }
+            List<String> values = headers.get(key);
+            xContentHeader(builder, key, values);
+        }
+        if (hasHeader) {
+            builder.endObject();
+        }
+    }
+
+    private void xContentHeader(XContentBuilder builder, String key, List<String> values) throws IOException {
+        if (values != null && values.isEmpty() == false) {
+            if(values.size() == 1) {
+                builder.field(key, values.get(0));
+            } else {
+                builder.startArray(key);
+                for (String value : values) {
+                    builder.value(value);
+                }
+                builder.endArray();
+            }
         }
     }
 
@@ -304,6 +347,9 @@ public class ElasticsearchException extends RuntimeException implements ToXConte
                 builder.startObject();
                 toXContent(builder, params, ex.getCause());
                 builder.endObject();
+            }
+            if (params.paramAsBoolean(REST_EXCEPTION_SKIP_STACK_TRACE, REST_EXCEPTION_SKIP_STACK_TRACE_DEFAULT) == false) {
+                builder.field("stack_trace", ExceptionsHelper.stackTrace(ex));
             }
         }
     }
@@ -354,7 +400,15 @@ public class ElasticsearchException extends RuntimeException implements ToXConte
 
     @Override
     public String toString() {
-        return ExceptionsHelper.detailedMessage(this).trim();
+        StringBuilder builder = new StringBuilder();
+        if (headers.containsKey(INDEX_HEADER_KEY)) {
+            builder.append('[').append(getIndex()).append(']');
+            if (headers.containsKey(SHARD_HEADER_KEY)) {
+                builder.append('[').append(getShardId()).append(']');
+            }
+            builder.append(' ');
+        }
+        return builder.append(ExceptionsHelper.detailedMessage(this).trim()).toString();
     }
 
     /**
@@ -366,7 +420,7 @@ public class ElasticsearchException extends RuntimeException implements ToXConte
         StackTraceElement[] stackTrace = new StackTraceElement[stackTraceElements];
         for (int i = 0; i < stackTraceElements; i++) {
             final String declaringClasss = in.readString();
-            final String fileName = in.readString();
+            final String fileName = in.readOptionalString();
             final String methodName = in.readString();
             final int lineNumber = in.readVInt();
             stackTrace[i] = new StackTraceElement(declaringClasss,methodName, fileName, lineNumber);
@@ -388,7 +442,7 @@ public class ElasticsearchException extends RuntimeException implements ToXConte
         out.writeVInt(stackTrace.length);
         for (StackTraceElement element : stackTrace) {
             out.writeString(element.getClassName());
-            out.writeString(element.getFileName());
+            out.writeOptionalString(element.getFileName());
             out.writeString(element.getMethodName());
             out.writeVInt(element.getLineNumber());
         }
@@ -408,7 +462,6 @@ public class ElasticsearchException extends RuntimeException implements ToXConte
                 org.elasticsearch.indices.recovery.RecoverFilesRecoveryException.class,
                 org.elasticsearch.index.translog.TruncatedTranslogException.class,
                 org.elasticsearch.repositories.RepositoryException.class,
-                org.elasticsearch.index.shard.IndexShardException.class,
                 org.elasticsearch.index.engine.DocumentSourceMissingException.class,
                 org.elasticsearch.index.engine.DocumentMissingException.class,
                 org.elasticsearch.common.util.concurrent.EsRejectedExecutionException.class,
@@ -433,19 +486,16 @@ public class ElasticsearchException extends RuntimeException implements ToXConte
                 org.elasticsearch.index.snapshots.IndexShardSnapshotException.class,
                 org.elasticsearch.search.query.QueryPhaseExecutionException.class,
                 org.elasticsearch.cluster.metadata.ProcessClusterEventTimeoutException.class,
-                org.elasticsearch.index.shard.IndexShardCreationException.class,
                 org.elasticsearch.index.percolator.PercolatorException.class,
                 org.elasticsearch.snapshots.ConcurrentSnapshotExecutionException.class,
                 org.elasticsearch.indices.IndexTemplateAlreadyExistsException.class,
                 org.elasticsearch.indices.InvalidIndexNameException.class,
-                org.elasticsearch.index.IndexException.class,
                 org.elasticsearch.indices.recovery.DelayRecoveryException.class,
                 org.elasticsearch.indices.AliasFilterParsingException.class,
                 org.elasticsearch.indices.InvalidIndexTemplateException.class,
                 org.elasticsearch.http.HttpException.class,
                 org.elasticsearch.index.shard.IndexShardNotRecoveringException.class,
                 org.elasticsearch.indices.IndexPrimaryShardNotAllocatedException.class,
-                org.elasticsearch.env.FailedToResolveConfigException.class,
                 org.elasticsearch.action.UnavailableShardsException.class,
                 org.elasticsearch.transport.ActionNotFoundTransportException.class,
                 org.elasticsearch.index.shard.TranslogRecoveryPerformer.BatchOperationException.class,
@@ -455,7 +505,6 @@ public class ElasticsearchException extends RuntimeException implements ToXConte
                 org.elasticsearch.cluster.block.ClusterBlockException.class,
                 org.elasticsearch.action.FailedNodeException.class,
                 org.elasticsearch.indices.TypeMissingException.class,
-                org.elasticsearch.index.IndexShardMissingException.class,
                 org.elasticsearch.indices.InvalidTypeNameException.class,
                 org.elasticsearch.transport.netty.SizeHeaderFrameDecoder.HttpOnTransportException.class,
                 org.elasticsearch.common.util.CancellableThreads.ExecutionCancelledException.class,
@@ -505,7 +554,6 @@ public class ElasticsearchException extends RuntimeException implements ToXConte
                 org.elasticsearch.ElasticsearchTimeoutException.class,
                 org.elasticsearch.search.SearchContextMissingException.class,
                 org.elasticsearch.transport.SendRequestTransportException.class,
-                org.elasticsearch.indices.IndexMissingException.class,
                 org.elasticsearch.index.IndexShardAlreadyExistsException.class,
                 org.elasticsearch.indices.IndexAlreadyExistsException.class,
                 org.elasticsearch.index.engine.DocumentAlreadyExistsException.class,
@@ -516,7 +564,7 @@ public class ElasticsearchException extends RuntimeException implements ToXConte
                 org.elasticsearch.index.shard.IndexShardNotStartedException.class,
                 org.elasticsearch.index.mapper.StrictDynamicMappingException.class,
                 org.elasticsearch.index.engine.EngineClosedException.class,
-                org.elasticsearch.rest.action.admin.indices.alias.delete.AliasesMissingException.class,
+                AliasesNotFoundException.class,
                 org.elasticsearch.transport.ResponseHandlerFailureTransportException.class,
                 org.elasticsearch.search.SearchParseException.class,
                 org.elasticsearch.search.fetch.FetchPhaseExecutionException.class,
@@ -532,7 +580,6 @@ public class ElasticsearchException extends RuntimeException implements ToXConte
                 org.elasticsearch.index.engine.RecoveryEngineException.class,
                 org.elasticsearch.common.blobstore.BlobStoreException.class,
                 org.elasticsearch.index.snapshots.IndexShardRestoreException.class,
-                org.elasticsearch.index.store.StoreException.class,
                 org.elasticsearch.index.query.QueryParsingException.class,
                 org.elasticsearch.action.support.replication.TransportReplicationAction.RetryOnPrimaryException.class,
                 org.elasticsearch.index.engine.DeleteByQueryFailedEngineException.class,
@@ -545,6 +592,10 @@ public class ElasticsearchException extends RuntimeException implements ToXConte
                 org.elasticsearch.action.PrimaryMissingActionException.class,
                 org.elasticsearch.index.engine.CreateFailedEngineException.class,
                 org.elasticsearch.index.shard.IllegalIndexShardStateException.class,
+                ElasticsearchSecurityException.class,
+                ResourceNotFoundException.class,
+                IndexNotFoundException.class,
+                ShardNotFoundException.class,
                 NotSerializableExceptionWrapper.class
         };
         Map<String, Constructor<? extends ElasticsearchException>> mapping = new HashMap<>(exceptions.length);
@@ -564,4 +615,73 @@ public class ElasticsearchException extends RuntimeException implements ToXConte
         MAPPING = Collections.unmodifiableMap(mapping);
     }
 
+    public String getIndex() {
+        List<String> index = getHeader(INDEX_HEADER_KEY);
+        if (index != null && index.isEmpty() == false) {
+            return index.get(0);
+        }
+
+        return null;
+    }
+
+    public ShardId getShardId() {
+        List<String> shard = getHeader(SHARD_HEADER_KEY);
+        if (shard != null && shard.isEmpty() == false) {
+            return new ShardId(getIndex(), Integer.parseInt(shard.get(0)));
+        }
+        return null;
+    }
+
+    public void setIndex(Index index) {
+        if (index != null) {
+            addHeader(INDEX_HEADER_KEY, index.getName());
+        }
+    }
+
+    public void setIndex(String index) {
+        if (index != null) {
+            addHeader(INDEX_HEADER_KEY, index);
+        }
+    }
+
+    public void setShard(ShardId shardId) {
+        if (shardId != null) {
+            addHeader(INDEX_HEADER_KEY, shardId.getIndex());
+            addHeader(SHARD_HEADER_KEY, Integer.toString(shardId.id()));
+        }
+    }
+
+    public void setResources(String type, String... id) {
+        assert type != null;
+        addHeader(RESOURCE_HEADER_ID_KEY, id);
+        addHeader(RESOURCE_HEADER_TYPE_KEY, type);
+    }
+
+    public List<String> getResourceId() {
+        return getHeader(RESOURCE_HEADER_ID_KEY);
+    }
+
+    public String getResourceType() {
+        List<String> header = getHeader(RESOURCE_HEADER_TYPE_KEY);
+        if (header != null && header.isEmpty() == false) {
+            assert header.size() == 1;
+            return header.get(0);
+        }
+        return null;
+    }
+
+    public static void renderThrowable(XContentBuilder builder, Params params, Throwable t) throws IOException {
+        builder.startObject("error");
+        final ElasticsearchException[] rootCauses = ElasticsearchException.guessRootCauses(t);
+        builder.field("root_cause");
+        builder.startArray();
+        for (ElasticsearchException rootCause : rootCauses){
+            builder.startObject();
+            rootCause.toXContent(builder, new ToXContent.DelegatingMapParams(Collections.singletonMap(ElasticsearchException.REST_EXCEPTION_SKIP_CAUSE, "true"), params));
+            builder.endObject();
+        }
+        builder.endArray();
+        ElasticsearchException.toXContent(builder, params, t);
+        builder.endObject();
+    }
 }

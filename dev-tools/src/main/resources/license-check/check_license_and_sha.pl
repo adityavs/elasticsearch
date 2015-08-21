@@ -2,27 +2,52 @@
 
 use strict;
 use warnings;
-use v5.10;
-use Digest::SHA qw(sha1);
-use File::Temp();
-use File::Basename qw(basename);
+use 5.010_000;
+
+use FindBin qw($RealBin);
+use lib "$RealBin/lib";
+use File::Spec();
+use File::Temp 0.2304 ();
 use File::Find();
-my $mode = shift(@ARGV) || die usage();
-my $dir  = shift(@ARGV) || die usage();
-$dir =~ s{/$}{};
+use File::Basename qw(basename);
+use Archive::Extract();
+use Digest::SHA();
+$Archive::Extract::PREFER_BIN = 1;
 
-our $RELEASES_DIR = "$dir/target/releases/";
-our $LICENSE_DIR  = "$dir/licenses/";
+my $mode = shift(@ARGV) || "";
+die usage() unless $mode =~ /^--(check|update)$/;
 
-$mode eq '--check'        ? check_shas_and_licenses($dir)
-    : $mode eq '--update' ? write_shas($dir)
-    :                       die usage();
+my $License_Dir = shift(@ARGV) || die usage();
+my $Source      = shift(@ARGV) || die usage();
+my $Ignore      = shift(@ARGV);
+my $ignore
+    = $Ignore
+    ? qr/${Ignore}[^\/]*$/
+    : qr/elasticsearch[^\/]*$/;
+
+$License_Dir = File::Spec->rel2abs($License_Dir) . '/';
+$Source      = File::Spec->rel2abs($Source);
+
+say "LICENSE DIR: $License_Dir";
+say "SOURCE: $Source";
+say "IGNORE: $Ignore";
+
+die "License dir is not a directory: $License_Dir\n" . usage()
+    unless -d $License_Dir;
+
+my %shas
+    = -f $Source ? jars_from_zip( $Source, $ignore )
+    : -d $Source ? jars_from_dir( $Source, $ignore )
+    :   die "Source is neither a directory nor a zip file: $Source" . usage();
+
+$mode eq '--check'
+    ? exit check_shas_and_licenses(%shas)
+    : exit write_shas(%shas);
 
 #===================================
 sub check_shas_and_licenses {
 #===================================
-    my %new = get_shas_from_zip();
-    check_tar_has_same_shas(%new);
+    my %new = @_;
 
     my %old      = get_sha_files();
     my %licenses = get_files_with('LICENSE');
@@ -41,7 +66,8 @@ sub check_shas_and_licenses {
         }
 
         unless ( $old_sha eq $new{$jar} ) {
-            say STDERR "$jar: SHA has changed";
+            say STDERR
+                "$jar: SHA has changed, expected $old_sha but found $new{$jar}";
             $error++;
             $sha_error++;
             next;
@@ -86,12 +112,14 @@ sub check_shas_and_licenses {
 
     my @unused_licenses = grep { !$licenses{$_} } keys %licenses;
     if (@unused_licenses) {
+        $error++;
         say STDERR "Extra LICENCE file present: " . join ", ",
             sort @unused_licenses;
     }
 
     my @unused_notices = grep { !$notices{$_} } keys %notices;
     if (@unused_notices) {
+        $error++;
         say STDERR "Extra NOTICE file present: " . join ", ",
             sort @unused_notices;
     }
@@ -101,18 +129,18 @@ sub check_shas_and_licenses {
 
 You can update the SHA files by running:
 
-    $0 --update core
+$0 --update $License_Dir $Source
 
 SHAS
     }
-
-    exit $error;
+    say("All SHAs and licenses OK") unless $error;
+    return $error;
 }
 
 #===================================
 sub write_shas {
 #===================================
-    my %new = get_shas_from_zip();
+    my %new = @_;
     my %old = get_sha_files();
 
     for my $jar ( sort keys %new ) {
@@ -123,7 +151,7 @@ sub write_shas {
         else {
             say "Adding $jar";
         }
-        open my $fh, '>', $LICENSE_DIR . $jar or die $!;
+        open my $fh, '>', $License_Dir . $jar or die $!;
         say $fh $new{$jar} or die $!;
         close $fh or die $!;
     }
@@ -133,8 +161,10 @@ sub write_shas {
 
     for my $jar ( sort keys %old ) {
         say "Deleting $jar";
-        unlink $LICENSE_DIR . $jar or die $!;
+        unlink $License_Dir . $jar or die $!;
     }
+    say "SHAs updated";
+    return 0;
 }
 
 #===================================
@@ -142,7 +172,7 @@ sub get_files_with {
 #===================================
     my $pattern = shift;
     my %files;
-    for my $path ( grep {-f} glob("$LICENSE_DIR/*$pattern*") ) {
+    for my $path ( grep {-f} glob("$License_Dir/*$pattern*") ) {
         my ($file) = ( $path =~ m{([^/]+)-${pattern}.*$} );
         $files{$file} = 0;
     }
@@ -154,10 +184,10 @@ sub get_sha_files {
 #===================================
     my %shas;
 
-    die "Missing directory: $LICENSE_DIR\n"
-        unless -d $LICENSE_DIR;
+    die "Missing directory: $License_Dir\n"
+        unless -d $License_Dir;
 
-    for my $file ( grep {-f} glob("$LICENSE_DIR/*.sha1") ) {
+    for my $file ( grep {-f} glob("$License_Dir/*.sha1") ) {
         my ($jar) = ( $file =~ m{([^/]+)$} );
         open my $fh, '<', $file or die $!;
         my $sha = <$fh>;
@@ -169,58 +199,33 @@ sub get_sha_files {
 }
 
 #===================================
-sub get_shas_from_zip {
+sub jars_from_zip {
 #===================================
-    my ($zip) = glob("$RELEASES_DIR/elasticsearch*.zip")
-        or die "No .zip file found in $RELEASES_DIR\n";
-
+    my ( $source, $ignore ) = @_;
     my $temp_dir = File::Temp->newdir;
     my $dir_name = $temp_dir->dirname;
-    system( 'unzip', "-j", "-q", $zip, "*.jar", "-d" => $dir_name )
-        && die "Error unzipping <$zip> to <" . $dir_name . ">: $!\n";
-
-    my @jars = grep { !/\/elasticsearch[^\/]+.jar$/ } glob "$dir_name/*.jar";
+    my $archive  = Archive::Extract->new( archive => $source, type => 'zip' );
+    $archive->extract( to => $dir_name ) || die $archive->error;
+    my @jars = map { File::Spec->rel2abs( $_, $dir_name ) }
+        grep { /\.jar$/ && !/$ignore/ } @{ $archive->files };
     return calculate_shas(@jars);
 }
 
 #===================================
-sub check_tar_has_same_shas {
+sub jars_from_dir {
 #===================================
-    my %zip_shas = @_;
-    my ($tar) = glob("$RELEASES_DIR/elasticsearch*.tar.gz")
-        or return;
-
-    my $temp_dir = File::Temp->newdir;
-    my $dir_name = $temp_dir->dirname;
-    system( 'tar', "-xz", "-C" => $dir_name, "-f" => $tar )
-        && die "Error unpacking <$tar> to <" . $dir_name . ">: $!\n";
-
+    my ( $source, $ignore ) = @_;
     my @jars;
     File::Find::find(
-        {   wanted =>
-                sub { push @jars, $_ if /\.jar$/ && !/elasticsearch[^\/]*$/ },
+        {   wanted => sub {
+                push @jars, File::Spec->rel2abs( $_, $source )
+                    if /\.jar$/ && !/$ignore/;
+            },
             no_chdir => 1
         },
-        $dir_name
+        $source
     );
-
-    my %tar_shas = calculate_shas(@jars);
-    my @errors;
-    for ( sort keys %zip_shas ) {
-        my $sha = delete $tar_shas{$_};
-        if ( !$sha ) {
-            push @errors, "$_: JAR present in zip but not in tar.gz";
-        }
-        elsif ( $sha ne $zip_shas{$_} ) {
-            push @errors, "$_: JAR in zip and tar.gz are different";
-        }
-    }
-    for ( sort keys %tar_shas ) {
-        push @errors, "$_: JAR present in tar.gz but not in zip";
-    }
-    if (@errors) {
-        die join "\n", @errors;
-    }
+    return calculate_shas(@jars);
 }
 
 #===================================
@@ -242,11 +247,17 @@ sub usage {
 
 USAGE:
 
-    $0 --check  dir   # check the sha1 and LICENSE files for each jar
-    $0 --update dir   # update the sha1 files for each jar
+    # check the sha1 and LICENSE files for each jar in the zip or directory
+    $0 --check  path/to/licenses/ path/to/package.zip [prefix_to_ignore]
+    $0 --check  path/to/licenses/ path/to/dir/ [prefix_to_ignore]
 
-The <dir> can be set to e.g. 'core' or 'plugins/analysis-icu/'
+    # updates the sha1s for each jar in the zip or directory
+    $0 --update path/to/licenses/ path/to/package.zip [prefix_to_ignore]
+    $0 --update path/to/licenses/ path/to/dir/ [prefix_to_ignore]
+
+The optional prefix_to_ignore parameter defaults to "elasticsearch".
 
 USAGE
 
 }
+

@@ -28,9 +28,9 @@ import org.elasticsearch.http.HttpServerTransport;
 import org.elasticsearch.http.netty.pipelining.OrderedDownstreamChannelEvent;
 import org.elasticsearch.http.netty.pipelining.OrderedUpstreamMessageEvent;
 import org.elasticsearch.indices.breaker.NoneCircuitBreakerService;
-import org.elasticsearch.test.ElasticsearchTestCase;
-import org.elasticsearch.test.cache.recycler.MockBigArrays;
-import org.elasticsearch.test.cache.recycler.MockPageCacheRecycler;
+import org.elasticsearch.test.ESTestCase;
+import org.elasticsearch.common.util.MockBigArrays;
+import org.elasticsearch.cache.recycler.MockPageCacheRecycler;
 import org.elasticsearch.threadpool.ThreadPool;
 import org.jboss.netty.buffer.ChannelBuffer;
 import org.jboss.netty.buffer.ChannelBuffers;
@@ -57,7 +57,7 @@ import static org.jboss.netty.handler.codec.http.HttpVersion.HTTP_1_1;
 /**
  * This test just tests, if he pipelining works in general with out any connection the elasticsearch handler
  */
-public class NettyHttpServerPipeliningTest extends ElasticsearchTestCase {
+public class NettyHttpServerPipeliningTest extends ESTestCase {
 
     private NetworkService networkService;
     private ThreadPool threadPool;

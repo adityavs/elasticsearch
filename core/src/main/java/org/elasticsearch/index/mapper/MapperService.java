@@ -53,7 +53,6 @@ import org.elasticsearch.common.util.concurrent.ReleasableLock;
 import org.elasticsearch.index.AbstractIndexComponent;
 import org.elasticsearch.index.Index;
 import org.elasticsearch.index.analysis.AnalysisService;
-import org.elasticsearch.index.fielddata.IndexFieldDataService;
 import org.elasticsearch.index.mapper.Mapper.BuilderContext;
 import org.elasticsearch.index.mapper.internal.TypeFieldMapper;
 import org.elasticsearch.index.mapper.object.ObjectMapper;
@@ -64,6 +63,7 @@ import org.elasticsearch.indices.TypeMissingException;
 import org.elasticsearch.percolator.PercolatorService;
 import org.elasticsearch.script.ScriptService;
 
+import java.io.Closeable;
 import java.io.IOException;
 import java.util.ArrayList;
 import java.util.Arrays;
@@ -79,7 +79,7 @@ import static org.elasticsearch.common.collect.MapBuilder.newMapBuilder;
 /**
  *
  */
-public class MapperService extends AbstractIndexComponent  {
+public class MapperService extends AbstractIndexComponent implements Closeable {
 
     public static final String DEFAULT_MAPPING = "_default_";
     private static ObjectHashSet<String> META_FIELDS = ObjectHashSet.from(
@@ -104,7 +104,6 @@ public class MapperService extends AbstractIndexComponent  {
     };
 
     private final AnalysisService analysisService;
-    private final IndexFieldDataService fieldDataService;
 
     /**
      * Will create types automatically if they do not exists in the mapping definition yet
@@ -139,14 +138,13 @@ public class MapperService extends AbstractIndexComponent  {
     private volatile ImmutableSet<String> parentTypes = ImmutableSet.of();
 
     @Inject
-    public MapperService(Index index, @IndexSettings Settings indexSettings, AnalysisService analysisService, IndexFieldDataService fieldDataService,
+    public MapperService(Index index, @IndexSettings Settings indexSettings, AnalysisService analysisService,
                          SimilarityLookupService similarityLookupService,
                          ScriptService scriptService) {
         super(index, indexSettings);
         this.analysisService = analysisService;
-        this.fieldDataService = fieldDataService;
         this.fieldTypes = new FieldTypeLookup();
-        this.documentParser = new DocumentMapperParser(index, indexSettings, this, analysisService, similarityLookupService, scriptService);
+        this.documentParser = new DocumentMapperParser(indexSettings, this, analysisService, similarityLookupService, scriptService);
         this.indexAnalyzer = new MapperAnalyzerWrapper(analysisService.defaultIndexAnalyzer(), INDEX_ANALYZER_EXTRACTOR);
         this.searchAnalyzer = new MapperAnalyzerWrapper(analysisService.defaultSearchAnalyzer(), SEARCH_ANALYZER_EXTRACTOR);
         this.searchQuoteAnalyzer = new MapperAnalyzerWrapper(analysisService.defaultSearchQuoteAnalyzer(), SEARCH_QUOTE_ANALYZER_EXTRACTOR);
@@ -263,6 +261,9 @@ public class MapperService extends AbstractIndexComponent  {
             if (mapper.type().length() == 0) {
                 throw new InvalidTypeNameException("mapping type name is empty");
             }
+            if (Version.indexCreated(indexSettings).onOrAfter(Version.V_2_0_0_beta1) && mapper.type().length() > 255) {
+                throw new InvalidTypeNameException("mapping type name [" + mapper.type() + "] is too long; limit is length 255 but was [" + mapper.type().length() + "]");
+            }
             if (mapper.type().charAt(0) == '_') {
                 throw new InvalidTypeNameException("mapping type name [" + mapper.type() + "] can't start with '_'");
             }
@@ -272,11 +273,15 @@ public class MapperService extends AbstractIndexComponent  {
             if (mapper.type().contains(",")) {
                 throw new InvalidTypeNameException("mapping type name [" + mapper.type() + "] should not include ',' in it");
             }
-            if (Version.indexCreated(indexSettings).onOrAfter(Version.V_2_0_0) && mapper.type().equals(mapper.parentFieldMapper().type())) {
+            if (Version.indexCreated(indexSettings).onOrAfter(Version.V_2_0_0_beta1) && mapper.type().equals(mapper.parentFieldMapper().type())) {
                 throw new IllegalArgumentException("The [_parent.type] option can't point to the same type");
             }
-            if (mapper.type().contains(".") && !PercolatorService.TYPE_NAME.equals(mapper.type())) {
-                logger.warn("Type [{}] contains a '.', it is recommended not to include it within a type name", mapper.type());
+            if (typeNameStartsWithIllegalDot(mapper)) {
+                if (Version.indexCreated(indexSettings).onOrAfter(Version.V_2_0_0_beta1)) {
+                    throw new IllegalArgumentException("mapping type name [" + mapper.type() + "] must not start with a '.'");
+                } else {
+                    logger.warn("Type [{}] starts with a '.', it is recommended not to start a type name with a '.'", mapper.type());
+                }
             }
             // we can add new field/object mappers while the old ones are there
             // since we get new instances of those, and when we remove, we remove
@@ -291,15 +296,12 @@ public class MapperService extends AbstractIndexComponent  {
                         logger.debug("merging mapping for type [{}] resulted in conflicts: [{}]", mapper.type(), Arrays.toString(result.buildConflicts()));
                     }
                 }
-                fieldDataService.onMappingUpdate();
                 return oldMapper;
             } else {
                 List<ObjectMapper> newObjectMappers = new ArrayList<>();
                 List<FieldMapper> newFieldMappers = new ArrayList<>();
-                for (RootMapper rootMapper : mapper.mapping().rootMappers) {
-                    if (rootMapper instanceof FieldMapper) {
-                        newFieldMappers.add((FieldMapper) rootMapper);
-                    }
+                for (MetadataFieldMapper metadataMapper : mapper.mapping().metadataMappers) {
+                    newFieldMappers.add(metadataMapper);
                 }
                 MapperUtils.collect(mapper.mapping().root, newObjectMappers, newFieldMappers);
                 checkNewMappersCompatibility(newObjectMappers, newFieldMappers, updateAllTypes);
@@ -319,6 +321,10 @@ public class MapperService extends AbstractIndexComponent  {
                 return mapper;
             }
         }
+    }
+
+    private boolean typeNameStartsWithIllegalDot(DocumentMapper mapper) {
+        return mapper.type().startsWith(".") && !PercolatorService.TYPE_NAME.equals(mapper.type());
     }
 
     private boolean assertSerialization(DocumentMapper mapper) {
@@ -626,6 +632,10 @@ public class MapperService extends AbstractIndexComponent  {
      */
     public static boolean isMetadataField(String fieldName) {
         return META_FIELDS.contains(fieldName);
+    }
+
+    public static String[] getAllMetaFields() {
+        return META_FIELDS.toArray(String.class);
     }
 
     /** An analyzer wrapper that can lookup fields within the index mappings */

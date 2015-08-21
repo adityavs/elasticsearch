@@ -20,11 +20,11 @@
 package org.elasticsearch.search.aggregations.support;
 
 import org.elasticsearch.common.Nullable;
+import org.elasticsearch.common.ParseField;
 import org.elasticsearch.common.xcontent.XContentParser;
 import org.elasticsearch.index.fielddata.IndexFieldData;
 import org.elasticsearch.index.fielddata.IndexGeoPointFieldData;
 import org.elasticsearch.index.fielddata.IndexNumericFieldData;
-import org.elasticsearch.index.mapper.FieldMapper;
 import org.elasticsearch.index.mapper.MappedFieldType;
 import org.elasticsearch.index.mapper.core.BooleanFieldMapper;
 import org.elasticsearch.index.mapper.core.DateFieldMapper;
@@ -40,6 +40,7 @@ import org.elasticsearch.search.SearchParseException;
 import org.elasticsearch.search.aggregations.InternalAggregation;
 import org.elasticsearch.search.aggregations.support.format.ValueFormat;
 import org.elasticsearch.search.internal.SearchContext;
+import org.joda.time.DateTimeZone;
 
 import java.io.IOException;
 import java.util.Map;
@@ -50,6 +51,8 @@ import static com.google.common.collect.Maps.newHashMap;
  *
  */
 public class ValuesSourceParser<VS extends ValuesSource> {
+
+    static final ParseField TIME_ZONE = new ParseField("time_zone");
 
     public static Builder any(String aggName, InternalAggregation.Type aggType, SearchContext context) {
         return new Builder<>(aggName, aggType, context, ValuesSource.class);
@@ -67,14 +70,19 @@ public class ValuesSourceParser<VS extends ValuesSource> {
         return new Builder<>(aggName, aggType, context, ValuesSource.GeoPoint.class).targetValueType(ValueType.GEOPOINT).scriptable(false);
     }
 
-    private static class Input {
-        String field = null;
-        Script script = null;
+    public static class Input {
+        private String field = null;
+        private Script script = null;
         @Deprecated
-        Map<String, Object> params = null; // TODO Remove in 2.0
-        ValueType valueType = null;
-        String format = null;
-        Object missing = null;
+        private Map<String, Object> params = null; // TODO Remove in 3.0
+        private ValueType valueType = null;
+        private String format = null;
+        private Object missing = null;
+        private DateTimeZone timezone = DateTimeZone.UTC;
+
+        public DateTimeZone timezone() {
+            return this.timezone;
+        }
     }
 
     private final String aggName;
@@ -84,6 +92,7 @@ public class ValuesSourceParser<VS extends ValuesSource> {
 
     private boolean scriptable = true;
     private boolean formattable = false;
+    private boolean timezoneAware = false;
     private ValueType targetValueType = null;
     private ScriptParameterParser scriptParameterParser = new ScriptParameterParser();
 
@@ -106,16 +115,18 @@ public class ValuesSourceParser<VS extends ValuesSource> {
                 input.field = parser.text();
             } else if (formattable && "format".equals(currentFieldName)) {
                 input.format = parser.text();
+            } else if (timezoneAware && context.parseFieldMatcher().match(currentFieldName, TIME_ZONE)) {
+                input.timezone = DateTimeZone.forID(parser.text());
             } else if (scriptable) {
                 if ("value_type".equals(currentFieldName) || "valueType".equals(currentFieldName)) {
                     input.valueType = ValueType.resolveForScript(parser.text());
                     if (targetValueType != null && input.valueType.isNotA(targetValueType)) {
                         throw new SearchParseException(context, aggType.name() + " aggregation [" + aggName +
                                 "] was configured with an incompatible value type [" + input.valueType + "]. [" + aggType +
-                                "] aggregation can only work on value of type [" + targetValueType + "]", 
+                                "] aggregation can only work on value of type [" + targetValueType + "]",
                                 parser.getTokenLocation());
                     }
-                } else if (!scriptParameterParser.token(currentFieldName, token, parser)) {
+                } else if (!scriptParameterParser.token(currentFieldName, token, parser, context.parseFieldMatcher())) {
                     return false;
                 }
                 return true;
@@ -124,9 +135,17 @@ public class ValuesSourceParser<VS extends ValuesSource> {
             }
             return true;
         }
+        if (token == XContentParser.Token.VALUE_NUMBER) {
+            if (timezoneAware && context.parseFieldMatcher().match(currentFieldName, TIME_ZONE)) {
+                input.timezone = DateTimeZone.forOffsetHours(parser.intValue());
+            } else {
+                return false;
+            }
+            return true;
+        }
         if (scriptable && token == XContentParser.Token.START_OBJECT) {
-            if (ScriptField.SCRIPT.match(currentFieldName)) {
-                input.script = Script.parse(parser);
+            if (context.parseFieldMatcher().match(currentFieldName, ScriptField.SCRIPT)) {
+                input.script = Script.parse(parser, context.parseFieldMatcher());
                 return true;
             } else if ("params".equals(currentFieldName)) {
                 input.params = parser.map();
@@ -149,12 +168,14 @@ public class ValuesSourceParser<VS extends ValuesSource> {
                 input.script = new Script(scriptValue.script(), scriptValue.scriptType(), scriptParameterParser.lang(), input.params);
             }
         }
-        
+
         ValueType valueType = input.valueType != null ? input.valueType : targetValueType;
 
         if (input.field == null) {
             if (input.script == null) {
-                return new ValuesSourceConfig(ValuesSource.class);
+                ValuesSourceConfig<VS> config = new ValuesSourceConfig(ValuesSource.class);
+                config.format = resolveFormat(null, valueType);
+                return config;
             }
             Class valuesSourceType = valueType != null ? (Class<VS>) valueType.getValuesSourceType() : this.valuesSourceType;
             if (valuesSourceType == null || valuesSourceType == ValuesSource.class) {
@@ -202,7 +223,7 @@ public class ValuesSourceParser<VS extends ValuesSource> {
         config.fieldContext = new FieldContext(input.field, indexFieldData, fieldType);
         config.missing = input.missing;
         config.script = createScript();
-        config.format = resolveFormat(input.format, fieldType);
+        config.format = resolveFormat(input.format, input.timezone, fieldType);
         return config;
     }
 
@@ -212,7 +233,7 @@ public class ValuesSourceParser<VS extends ValuesSource> {
 
     private static ValueFormat resolveFormat(@Nullable String format, @Nullable ValueType valueType) {
         if (valueType == null) {
-            return null; // we can't figure it out
+            return ValueFormat.RAW; // we can't figure it out
         }
         ValueFormat valueFormat = valueType.defaultFormat;
         if (valueFormat != null && valueFormat instanceof ValueFormat.Patternable && format != null) {
@@ -221,9 +242,9 @@ public class ValuesSourceParser<VS extends ValuesSource> {
         return valueFormat;
     }
 
-    private static ValueFormat resolveFormat(@Nullable String format, MappedFieldType fieldType) {
+    private static ValueFormat resolveFormat(@Nullable String format, @Nullable DateTimeZone timezone,  MappedFieldType fieldType) {
         if (fieldType instanceof  DateFieldMapper.DateFieldType) {
-            return format != null ? ValueFormat.DateTime.format(format) : ValueFormat.DateTime.mapper((DateFieldMapper.DateFieldType) fieldType);
+            return format != null ? ValueFormat.DateTime.format(format, timezone) : ValueFormat.DateTime.mapper((DateFieldMapper.DateFieldType) fieldType, timezone);
         }
         if (fieldType instanceof IpFieldMapper.IpFieldType) {
             return ValueFormat.IPv4;
@@ -234,7 +255,11 @@ public class ValuesSourceParser<VS extends ValuesSource> {
         if (fieldType instanceof NumberFieldMapper.NumberFieldType) {
             return format != null ? ValueFormat.Number.format(format) : ValueFormat.RAW;
         }
-        return null;
+        return ValueFormat.RAW;
+    }
+
+    public Input input() {
+        return this.input;
     }
 
     public static class Builder<VS extends ValuesSource> {
@@ -252,6 +277,11 @@ public class ValuesSourceParser<VS extends ValuesSource> {
 
         public Builder<VS> formattable(boolean formattable) {
             parser.formattable = formattable;
+            return this;
+        }
+
+        public Builder<VS> timezoneAware(boolean timezoneAware) {
+            parser.timezoneAware = timezoneAware;
             return this;
         }
 

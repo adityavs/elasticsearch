@@ -25,7 +25,7 @@ import org.elasticsearch.action.search.ShardSearchFailure;
 import org.elasticsearch.index.Index;
 import org.elasticsearch.index.query.TestQueryParsingException;
 import org.elasticsearch.search.SearchShardTarget;
-import org.elasticsearch.test.ElasticsearchTestCase;
+import org.elasticsearch.test.ESTestCase;
 import org.elasticsearch.test.rest.FakeRestRequest;
 import org.elasticsearch.transport.RemoteTransportException;
 import org.junit.Test;
@@ -41,7 +41,7 @@ import static org.hamcrest.Matchers.notNullValue;
 /**
  *
  */
-public class BytesRestResponseTests extends ElasticsearchTestCase {
+public class BytesRestResponseTests extends ESTestCase {
 
     @Test
     public void testWithHeaders() throws Exception {
@@ -105,8 +105,8 @@ public class BytesRestResponseTests extends ElasticsearchTestCase {
         BytesRestResponse response = new BytesRestResponse(channel, t);
         String text = response.content().toUtf8();
         assertThat(text, containsString("\"type\":\"throwable\",\"reason\":\"an error occurred reading data\""));
-        assertThat(text, containsString("{\"type\":\"file_not_found_exception\",\"reason\":\"/foo/bar\"}"));
-        assertThat(text, containsString("\"error_trace\":{\"message\":\"an error occurred reading data\""));
+        assertThat(text, containsString("{\"type\":\"file_not_found_exception\""));
+        assertThat(text, containsString("\"stack_trace\":\"[an error occurred reading data]"));
     }
 
     public void testGuessRootCause() throws IOException {
@@ -152,10 +152,12 @@ public class BytesRestResponseTests extends ElasticsearchTestCase {
         assertEquals(expected.trim(), text.trim());
     }
 
-    public static class WithHeadersException extends ElasticsearchException.WithRestHeadersException {
+    public static class WithHeadersException extends ElasticsearchException {
 
         WithHeadersException() {
-            super("", header("n1", "v11", "v12"), header("n2", "v21", "v22"));
+            super("");
+            this.addHeader("n1", "v11", "v12");
+            this.addHeader("n2", "v21", "v22");
         }
     }
 

@@ -23,11 +23,12 @@ import com.carrotsearch.hppc.ObjectIntHashMap;
 import com.carrotsearch.hppc.ObjectIntMap;
 import org.elasticsearch.cluster.routing.ShardRouting;
 import org.elasticsearch.cluster.routing.ShardRoutingState;
+import org.elasticsearch.cluster.routing.TestShardRouting;
 import org.elasticsearch.index.shard.ShardId;
 import org.elasticsearch.indices.flush.IndicesSyncedFlushResult.ShardCounts;
 import org.elasticsearch.indices.flush.SyncedFlushService.SyncedFlushResponse;
 import org.elasticsearch.rest.RestStatus;
-import org.elasticsearch.test.ElasticsearchTestCase;
+import org.elasticsearch.test.ESTestCase;
 
 import java.io.IOException;
 import java.util.ArrayList;
@@ -39,7 +40,7 @@ import static org.elasticsearch.test.XContentTestUtils.convertToMap;
 import static org.hamcrest.Matchers.equalTo;
 import static org.hamcrest.Matchers.hasSize;
 
-public class SyncedFlushUnitTests extends ElasticsearchTestCase {
+public class SyncedFlushUnitTests extends ESTestCase {
 
 
     private static class TestPlan {
@@ -106,7 +107,7 @@ public class SyncedFlushUnitTests extends ElasticsearchTestCase {
                 } else {
                     Map<ShardRouting, SyncedFlushResponse> shardResponses = new HashMap<>();
                     for (int copy = 0; copy < replicas + 1; copy++) {
-                        final ShardRouting shardRouting = new ShardRouting(index, shard, "node_" + shardId + "_" + copy, null,
+                        final ShardRouting shardRouting = TestShardRouting.newShardRouting(index, shard, "node_" + shardId + "_" + copy, null,
                                 copy == 0, ShardRoutingState.STARTED, 0);
                         if (randomInt(5) < 2) {
                             // shard copy failure

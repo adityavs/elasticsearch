@@ -38,6 +38,7 @@ import org.apache.lucene.util.CharsRefBuilder;
 import org.apache.lucene.util.NumericUtils;
 import org.apache.lucene.util.automaton.TooComplexToDeterminizeException;
 import org.elasticsearch.action.termvectors.*;
+import org.elasticsearch.cluster.metadata.MetaData;
 import org.elasticsearch.common.Strings;
 import org.elasticsearch.common.bytes.BytesArray;
 import org.elasticsearch.common.compress.CompressedXContent;
@@ -53,6 +54,7 @@ import org.elasticsearch.common.xcontent.XContentFactory;
 import org.elasticsearch.common.xcontent.XContentHelper;
 import org.elasticsearch.common.xcontent.XContentParser;
 import org.elasticsearch.index.IndexService;
+import org.elasticsearch.index.engine.Engine;
 import org.elasticsearch.index.mapper.MapperService;
 import org.elasticsearch.index.mapper.ParsedDocument;
 import org.elasticsearch.index.mapper.core.NumberFieldMapper;
@@ -62,25 +64,28 @@ import org.elasticsearch.index.search.geo.GeoPolygonQuery;
 import org.elasticsearch.index.search.geo.InMemoryGeoBoundingBoxQuery;
 import org.elasticsearch.index.search.morelikethis.MoreLikeThisFetchService;
 import org.elasticsearch.search.internal.SearchContext;
-import org.elasticsearch.test.ElasticsearchSingleNodeTest;
+import org.elasticsearch.test.ESSingleNodeTestCase;
 import org.hamcrest.Matchers;
 import org.junit.Before;
 import org.junit.Test;
 
 import java.io.IOException;
+import java.util.Arrays;
 import java.util.EnumSet;
 import java.util.List;
+import java.util.Locale;
 
-import static org.elasticsearch.common.io.Streams.copyToBytesFromClasspath;
-import static org.elasticsearch.common.io.Streams.copyToStringFromClasspath;
 import static org.elasticsearch.common.xcontent.XContentFactory.jsonBuilder;
 import static org.elasticsearch.index.query.QueryBuilders.*;
+import static org.elasticsearch.test.StreamsUtils.copyToBytesFromClasspath;
+import static org.elasticsearch.test.StreamsUtils.copyToStringFromClasspath;
 import static org.elasticsearch.test.hamcrest.ElasticsearchAssertions.assertBooleanSubQuery;
 import static org.hamcrest.Matchers.*;
 
-public class SimpleIndexQueryParserTests extends ElasticsearchSingleNodeTest {
+public class SimpleIndexQueryParserTests extends ESSingleNodeTestCase {
 
     private IndexQueryParserService queryParser;
+    private IndexService indexService;
 
     @Before
     public void setup() throws IOException {
@@ -93,10 +98,11 @@ public class SimpleIndexQueryParserTests extends ElasticsearchSingleNodeTest {
 
         String mapping = copyToStringFromClasspath("/org/elasticsearch/index/query/mapping.json");
         mapperService.merge("person", new CompressedXContent(mapping), true, false);
-        ParsedDocument doc = mapperService.documentMapper("person").parse("person", "1", new BytesArray(copyToBytesFromClasspath("/org/elasticsearch/index/query/data.json")));
+        ParsedDocument doc = mapperService.documentMapper("person").parse("test", "person", "1", new BytesArray(copyToBytesFromClasspath("/org/elasticsearch/index/query/data.json")));
         assertNotNull(doc.dynamicMappingsUpdate());
         client().admin().indices().preparePutMapping("test").setType("person").setSource(doc.dynamicMappingsUpdate().toString()).get();
 
+        this.indexService = indexService;
         queryParser = indexService.queryParserService();
     }
 
@@ -428,12 +434,13 @@ public class SimpleIndexQueryParserTests extends ElasticsearchSingleNodeTest {
         assertThat(parsedQuery, instanceOf(FuzzyQuery.class));
         FuzzyQuery fuzzyQuery = (FuzzyQuery) parsedQuery;
         assertThat(fuzzyQuery.getTerm(), equalTo(new Term("name.first", "sh")));
+        assertThat(fuzzyQuery.getRewriteMethod(), instanceOf(MultiTermQuery.TopTermsBlendedFreqScoringRewrite.class));
     }
 
     @Test
     public void testFuzzyQueryWithFieldsBuilder() throws IOException {
         IndexQueryParserService queryParser = queryParser();
-        Query parsedQuery = queryParser.parse(fuzzyQuery("name.first", "sh").fuzziness(Fuzziness.fromSimilarity(0.1f)).prefixLength(1).boost(2.0f).buildAsBytes()).query();
+        Query parsedQuery = queryParser.parse(fuzzyQuery("name.first", "sh").fuzziness(Fuzziness.ONE).prefixLength(1).boost(2.0f).buildAsBytes()).query();
         assertThat(parsedQuery, instanceOf(FuzzyQuery.class));
         FuzzyQuery fuzzyQuery = (FuzzyQuery) parsedQuery;
         assertThat(fuzzyQuery.getTerm(), equalTo(new Term("name.first", "sh")));
@@ -450,7 +457,7 @@ public class SimpleIndexQueryParserTests extends ElasticsearchSingleNodeTest {
         assertThat(parsedQuery, instanceOf(FuzzyQuery.class));
         FuzzyQuery fuzzyQuery = (FuzzyQuery) parsedQuery;
         assertThat(fuzzyQuery.getTerm(), equalTo(new Term("name.first", "sh")));
-        assertThat(fuzzyQuery.getMaxEdits(), equalTo(FuzzyQuery.floatToEdits(0.1f, "sh".length())));
+        assertThat(fuzzyQuery.getMaxEdits(), equalTo(Fuzziness.AUTO.asDistance("sh")));
         assertThat(fuzzyQuery.getPrefixLength(), equalTo(1));
         assertThat(fuzzyQuery.getBoost(), equalTo(2.0f));
     }
@@ -1067,6 +1074,33 @@ public class SimpleIndexQueryParserTests extends ElasticsearchSingleNodeTest {
 
         assertThat(((TermQuery) clauses[1].getQuery()).getTerm(), equalTo(new Term("name.first", "test")));
         assertThat(clauses[1].getOccur(), equalTo(BooleanClause.Occur.SHOULD));
+
+        assertFalse("terms query disable_coord disabled by default", booleanQuery.isCoordDisabled());
+    }
+
+    @Test
+    public void testTermsQueryOptions() throws IOException {
+        IndexQueryParserService queryParser = queryParser();
+        String query = copyToStringFromClasspath("/org/elasticsearch/index/query/terms-query-options.json");
+        Query parsedQuery = queryParser.parse(query).query();
+        assertThat(parsedQuery, instanceOf(BooleanQuery.class));
+        BooleanQuery booleanQuery = (BooleanQuery) parsedQuery;
+        BooleanClause[] clauses = booleanQuery.getClauses();
+
+        assertThat(clauses.length, equalTo(3));
+
+        assertThat(((TermQuery) clauses[0].getQuery()).getTerm(), equalTo(new Term("name.first", "shay")));
+        assertThat(clauses[0].getOccur(), equalTo(BooleanClause.Occur.SHOULD));
+
+        assertThat(((TermQuery) clauses[1].getQuery()).getTerm(), equalTo(new Term("name.first", "test")));
+        assertThat(clauses[1].getOccur(), equalTo(BooleanClause.Occur.SHOULD));
+
+        assertThat(((TermQuery) clauses[2].getQuery()).getTerm(), equalTo(new Term("name.first", "elasticsearch")));
+        assertThat(clauses[2].getOccur(), equalTo(BooleanClause.Occur.SHOULD));
+
+        assertTrue("terms query disable_coord option mismatch", booleanQuery.isCoordDisabled());
+        assertThat(booleanQuery.getBoost(), equalTo(2.0f));
+        assertThat(booleanQuery.getMinimumNumberShouldMatch(), equalTo(2));
     }
 
     @Test
@@ -1198,6 +1232,28 @@ public class SimpleIndexQueryParserTests extends ElasticsearchSingleNodeTest {
                 new TermQuery(new Term("name.first", "shay")),
                 new TermQuery(new Term("name.last", "banon")));
         assertEquals(expected, parsedQuery.query());
+    }
+
+    @Test
+    public void testTermQueryParserShouldOnlyAllowSingleTerm() throws Exception {
+        String query = copyToStringFromClasspath("/org/elasticsearch/index/query/term-filter-broken-multi-terms.json");
+        assertQueryParsingFailureDueToMultipleTermsInTermFilter(query);
+    }
+
+    @Test
+    public void testTermQueryParserShouldOnlyAllowSingleTermInAlternateFormat() throws Exception {
+        String query = copyToStringFromClasspath("/org/elasticsearch/index/query/term-filter-broken-multi-terms-2.json");
+        assertQueryParsingFailureDueToMultipleTermsInTermFilter(query);
+    }
+
+    private void assertQueryParsingFailureDueToMultipleTermsInTermFilter(String query) throws IOException {
+        IndexQueryParserService queryParser = queryParser();
+        try {
+            queryParser.parse(query);
+            fail("Expected Query Parsing Exception but did not happen");
+        } catch (QueryParsingException e) {
+            assertThat(e.getMessage(), containsString("[term] query does not support different field names, use [bool] query instead"));
+        }
     }
 
     @Test
@@ -2244,6 +2300,23 @@ public class SimpleIndexQueryParserTests extends ElasticsearchSingleNodeTest {
         assertThat(parsedQuery, instanceOf(BooleanQuery.class));
     }
 
+    public void testCrossFieldMultiMatchQuery() throws IOException {
+        IndexQueryParserService queryParser = queryParser();
+        Query parsedQuery = queryParser.parse(multiMatchQuery("banon", "name.first^2", "name.last^3", "foobar").type(MultiMatchQueryBuilder.Type.CROSS_FIELDS)).query();
+        try (Engine.Searcher searcher = indexService.shardSafe(0).acquireSearcher("test")) {
+            Query rewrittenQuery = searcher.searcher().rewrite(parsedQuery);
+
+            BooleanQuery expected = new BooleanQuery();
+            expected.add(new TermQuery(new Term("foobar", "banon")), Occur.SHOULD);
+            TermQuery tq1 = new TermQuery(new Term("name.first", "banon"));
+            tq1.setBoost(2);
+            TermQuery tq2 = new TermQuery(new Term("name.last", "banon"));
+            tq2.setBoost(3);
+            expected.add(new DisjunctionMaxQuery(Arrays.<Query>asList(tq1, tq2), 0f), Occur.SHOULD);
+            assertEquals(expected, rewrittenQuery);
+        }
+    }
+
     @Test
     public void testSimpleQueryString() throws Exception {
         IndexQueryParserService queryParser = queryParser();
@@ -2297,7 +2370,7 @@ public class SimpleIndexQueryParserTests extends ElasticsearchSingleNodeTest {
             queryParser.parse(query).query();
             fail("FunctionScoreQueryParser should throw an exception here because two functions in body are not allowed.");
         } catch (QueryParsingException e) {
-            assertThat(e.getDetailedMessage(), containsString("Use functions[{...},...] if you want to define several functions."));
+            assertThat(e.getDetailedMessage(), containsString("use [functions] array if you want to define several functions."));
         }
     }
 
@@ -2334,7 +2407,7 @@ public class SimpleIndexQueryParserTests extends ElasticsearchSingleNodeTest {
         IndexQueryParserService queryParser = queryParser();
         String query = jsonBuilder().startObject().startObject("function_score")
                 .startArray("functions")
-                .startObject().field("weight", 2).field("boost_factor",2).endObject()
+                .startObject().field("weight", 2).field("boost_factor", 2).endObject()
                 .endArray()
                 .endObject().endObject().string();
         try {
@@ -2353,7 +2426,7 @@ public class SimpleIndexQueryParserTests extends ElasticsearchSingleNodeTest {
             queryParser.parse(query).query();
             fail("Expect exception here because array of functions and one weight in body is not allowed.");
         } catch (QueryParsingException e) {
-            assertThat(e.getDetailedMessage(), containsString("You can either define \"functions\":[...] or a single function, not both. Found \"functions\": [...] already, now encountering \"weight\"."));
+            assertThat(e.getDetailedMessage(), containsString("you can either define [functions] array or a single function, not both. already found [functions] array, now encountering [weight]."));
         }
         query = jsonBuilder().startObject().startObject("function_score")
                 .field("weight", 2)
@@ -2365,7 +2438,7 @@ public class SimpleIndexQueryParserTests extends ElasticsearchSingleNodeTest {
             queryParser.parse(query).query();
             fail("Expect exception here because array of functions and one weight in body is not allowed.");
         } catch (QueryParsingException e) {
-            assertThat(e.getDetailedMessage(), containsString("You can either define \"functions\":[...] or a single function, not both. Found \"weight\" already, now encountering \"functions\": [...]."));
+            assertThat(e.getDetailedMessage(), containsString("you can either define [functions] array or a single function, not both. already found [weight], now encountering [functions]."));
         }
     }
 
@@ -2422,5 +2495,32 @@ public class SimpleIndexQueryParserTests extends ElasticsearchSingleNodeTest {
         ConstantScoreQuery csq = (ConstantScoreQuery) queryParser.parse(constantScoreQuery(termsQuery("foo", "bar"))).query();
         q = csq.getQuery();
         assertThat(q, instanceOf(TermsQuery.class));
+    }
+
+    @Test
+    public void testBlendedRewriteMethod() throws IOException {
+        IndexQueryParserService queryParser = queryParser();
+        for (String rewrite : Arrays.asList("top_terms_blended_freqs_10", "topTermsBlendedFreqs10")) {
+            Query parsedQuery = queryParser.parse(prefixQuery("field", "val").rewrite(rewrite)).query();
+            assertThat(parsedQuery, instanceOf(PrefixQuery.class));
+            PrefixQuery prefixQuery = (PrefixQuery) parsedQuery;
+            assertThat(prefixQuery.getPrefix(), equalTo(new Term("field", "val")));
+            assertThat(prefixQuery.getRewriteMethod(), instanceOf(MultiTermQuery.TopTermsBlendedFreqScoringRewrite.class));
+        }
+    }
+
+    @Test
+    public void testSimpleQueryStringNoFields() throws Exception {
+        IndexQueryParserService queryParser = queryParser();
+        String queryText = randomAsciiOfLengthBetween(1, 10).toLowerCase(Locale.ROOT);
+        String query = "{\n" +
+                "    \"simple_query_string\" : {\n" +
+                "        \"query\" : \"" + queryText + "\"\n" +
+                "    }\n" +
+                "}";
+        Query parsedQuery = queryParser.parse(query).query();
+        assertThat(parsedQuery, instanceOf(TermQuery.class));
+        TermQuery termQuery = (TermQuery) parsedQuery;
+        assertThat(termQuery.getTerm(), equalTo(new Term(MetaData.ALL, queryText)));
     }
 }

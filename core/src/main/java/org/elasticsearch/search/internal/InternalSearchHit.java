@@ -38,12 +38,12 @@ import org.elasticsearch.common.xcontent.ToXContent;
 import org.elasticsearch.common.xcontent.XContentBuilder;
 import org.elasticsearch.common.xcontent.XContentBuilderString;
 import org.elasticsearch.common.xcontent.XContentHelper;
-import org.elasticsearch.index.fielddata.fieldcomparator.BytesRefFieldComparatorSource;
 import org.elasticsearch.search.SearchHit;
 import org.elasticsearch.search.SearchHitField;
 import org.elasticsearch.search.SearchHits;
 import org.elasticsearch.search.SearchShardTarget;
 import org.elasticsearch.search.highlight.HighlightField;
+import org.elasticsearch.search.internal.InternalSearchHits.StreamContext.ShardTargetType;
 import org.elasticsearch.search.lookup.SourceLookup;
 
 import java.io.IOException;
@@ -64,7 +64,6 @@ import static org.elasticsearch.search.internal.InternalSearchHitField.readSearc
 public class InternalSearchHit implements SearchHit {
 
     private static final Object[] EMPTY_SORT_VALUES = new Object[0];
-    private static final Text MAX_TERM_AS_TEXT = new StringAndBytesText(BytesRefFieldComparatorSource.MAX_TERM.utf8ToString());
 
     private transient int docId;
 
@@ -506,13 +505,7 @@ public class InternalSearchHit implements SearchHit {
         if (sortValues != null && sortValues.length > 0) {
             builder.startArray(Fields.SORT);
             for (Object sortValue : sortValues) {
-                if (sortValue != null && sortValue.equals(MAX_TERM_AS_TEXT)) {
-                    // We don't display MAX_TERM in JSON responses in case some clients have UTF-8 parsers that wouldn't accept a
-                    // non-character in the response, even though this is valid UTF-8
-                    builder.nullValue();
-                } else {
-                    builder.value(sortValue);
-                }
+                builder.value(sortValue);
             }
             builder.endArray();
         }
@@ -563,7 +556,7 @@ public class InternalSearchHit implements SearchHit {
 
     @Override
     public void readFrom(StreamInput in) throws IOException {
-        readFrom(in, InternalSearchHits.streamContext().streamShardTarget(InternalSearchHits.StreamContext.ShardTargetType.STREAM));
+        readFrom(in, InternalSearchHits.streamContext().streamShardTarget(ShardTargetType.STREAM));
     }
 
     public void readFrom(StreamInput in, InternalSearchHits.StreamContext context) throws IOException {
@@ -685,11 +678,11 @@ public class InternalSearchHit implements SearchHit {
             }
         }
 
-        if (context.streamShardTarget() == InternalSearchHits.StreamContext.ShardTargetType.STREAM) {
+        if (context.streamShardTarget() == ShardTargetType.STREAM) {
             if (in.readBoolean()) {
                 shard = readSearchShardTarget(in);
             }
-        } else if (context.streamShardTarget() == InternalSearchHits.StreamContext.ShardTargetType.LOOKUP) {
+        } else if (context.streamShardTarget() == ShardTargetType.LOOKUP) {
             int lookupId = in.readVInt();
             if (lookupId > 0) {
                 shard = context.handleShardLookup().get(lookupId);
@@ -701,7 +694,9 @@ public class InternalSearchHit implements SearchHit {
             innerHits = new HashMap<>(size);
             for (int i = 0; i < size; i++) {
                 String key = in.readString();
-                InternalSearchHits value = InternalSearchHits.readSearchHits(in, InternalSearchHits.streamContext().streamShardTarget(InternalSearchHits.StreamContext.ShardTargetType.NO_STREAM));
+                ShardTargetType shardTarget = context.streamShardTarget();
+                InternalSearchHits value = InternalSearchHits.readSearchHits(in, context.streamShardTarget(ShardTargetType.NO_STREAM));
+                context.streamShardTarget(shardTarget);
                 innerHits.put(key, value);
             }
         }
@@ -709,7 +704,7 @@ public class InternalSearchHit implements SearchHit {
 
     @Override
     public void writeTo(StreamOutput out) throws IOException {
-        writeTo(out, InternalSearchHits.streamContext().streamShardTarget(InternalSearchHits.StreamContext.ShardTargetType.STREAM));
+        writeTo(out, InternalSearchHits.streamContext().streamShardTarget(ShardTargetType.STREAM));
     }
 
     public void writeTo(StreamOutput out, InternalSearchHits.StreamContext context) throws IOException {
@@ -794,14 +789,14 @@ public class InternalSearchHit implements SearchHit {
             }
         }
 
-        if (context.streamShardTarget() == InternalSearchHits.StreamContext.ShardTargetType.STREAM) {
+        if (context.streamShardTarget() == ShardTargetType.STREAM) {
             if (shard == null) {
                 out.writeBoolean(false);
             } else {
                 out.writeBoolean(true);
                 shard.writeTo(out);
             }
-        } else if (context.streamShardTarget() == InternalSearchHits.StreamContext.ShardTargetType.LOOKUP) {
+        } else if (context.streamShardTarget() == ShardTargetType.LOOKUP) {
             if (shard == null) {
                 out.writeVInt(0);
             } else {
@@ -815,7 +810,9 @@ public class InternalSearchHit implements SearchHit {
             out.writeVInt(innerHits.size());
             for (Map.Entry<String, InternalSearchHits> entry : innerHits.entrySet()) {
                 out.writeString(entry.getKey());
-                entry.getValue().writeTo(out, InternalSearchHits.streamContext().streamShardTarget(InternalSearchHits.StreamContext.ShardTargetType.NO_STREAM));
+                ShardTargetType shardTarget = context.streamShardTarget();
+                entry.getValue().writeTo(out, context.streamShardTarget(ShardTargetType.NO_STREAM));
+                context.streamShardTarget(shardTarget);
             }
         }
     }

@@ -20,9 +20,9 @@
 package org.elasticsearch.search.aggregations.pipeline.movavg.models;
 
 import org.elasticsearch.common.Nullable;
+import org.elasticsearch.common.ParseFieldMatcher;
 import org.elasticsearch.common.io.stream.StreamOutput;
 import org.elasticsearch.search.SearchParseException;
-import org.elasticsearch.search.internal.SearchContext;
 
 import java.io.IOException;
 import java.text.ParseException;
@@ -33,16 +33,41 @@ import java.util.Map;
 public abstract class MovAvgModel {
 
     /**
+     * Should this model be fit to the data via a cost minimizing algorithm by default?
+     *
+     * @return
+     */
+    public boolean minimizeByDefault() {
+        return false;
+    }
+
+    /**
+     * Returns if the model can be cost minimized.  Not all models have parameters
+     * which can be tuned / optimized.
+     *
+     * @return
+     */
+    public abstract boolean canBeMinimized();
+
+    /**
+     * Generates a "neighboring" model, where one of the tunable parameters has been
+     * randomly mutated within the allowed range.  Used for minimization
+     *
+     * @return
+     */
+    public abstract MovAvgModel neighboringModel();
+
+    /**
      * Checks to see this model can produce a new value, without actually running the algo.
      * This can be used for models that have certain preconditions that need to be met in order
      * to short-circuit execution
      *
-     * @param windowLength  Length of current window
-     * @return              Returns `true` if calling next() will produce a value, `false` otherwise
+     * @param valuesAvailable Number of values in the current window of values
+     * @return                Returns `true` if calling next() will produce a value, `false` otherwise
      */
-    public boolean hasValue(int windowLength) {
+    public boolean hasValue(int valuesAvailable) {
         // Default implementation can always provide a next() value
-        return windowLength > 0;
+        return valuesAvailable > 0;
     }
 
     /**
@@ -85,7 +110,7 @@ public abstract class MovAvgModel {
 
     /**
      * Returns an empty set of predictions, filled with NaNs
-     * @param numPredictions
+     * @param numPredictions Number of empty predictions to generate
      * @return
      */
     protected double[] emptyPredictions(int numPredictions) {
@@ -103,6 +128,13 @@ public abstract class MovAvgModel {
     public abstract void writeTo(StreamOutput out) throws IOException;
 
     /**
+     * Clone the model, returning an exact copy
+     *
+     * @return
+     */
+    public abstract MovAvgModel clone();
+
+    /**
      * Abstract class which also provides some concrete parsing functionality.
      */
     public abstract static class AbstractModelParser {
@@ -117,12 +149,14 @@ public abstract class MovAvgModel {
         /**
          * Parse a settings hash that is specific to this model
          *
-         * @param settings      Map of settings, extracted from the request
-         * @param pipelineName   Name of the parent pipeline agg
-         * @param windowSize    Size of the window for this moving avg
-         * @return              A fully built moving average model
+         * @param settings           Map of settings, extracted from the request
+         * @param pipelineName       Name of the parent pipeline agg
+         * @param windowSize         Size of the window for this moving avg
+         * @param parseFieldMatcher  Matcher for field names
+         * @return                   A fully built moving average model
          */
-        public abstract MovAvgModel parse(@Nullable Map<String, Object> settings, String pipelineName, int windowSize) throws ParseException;
+        public abstract MovAvgModel parse(@Nullable Map<String, Object> settings, String pipelineName,
+                                          int windowSize, ParseFieldMatcher parseFieldMatcher) throws ParseException;
 
 
         /**
@@ -147,6 +181,7 @@ public abstract class MovAvgModel {
             } else if (value instanceof Number) {
                 double v = ((Number) value).doubleValue();
                 if (v >= 0 && v <= 1) {
+                    settings.remove(name);
                     return v;
                 }
 
@@ -178,6 +213,7 @@ public abstract class MovAvgModel {
             if (value == null) {
                 return defaultValue;
             } else if (value instanceof Number) {
+                settings.remove(name);
                 return ((Number) value).intValue();
             }
 
@@ -205,11 +241,18 @@ public abstract class MovAvgModel {
             if (value == null) {
                 return defaultValue;
             } else if (value instanceof Boolean) {
+                settings.remove(name);
                 return (Boolean)value;
             }
 
             throw new ParseException("Parameter [" + name + "] must be a boolean, type `"
                     + value.getClass().getSimpleName() + "` provided instead", 0);
+        }
+
+        protected void checkUnrecognizedParams(@Nullable Map<String, Object> settings) throws ParseException {
+            if (settings != null && settings.size() > 0) {
+                throw new ParseException("Unrecognized parameter(s): [" + settings.keySet() + "]", 0);
+            }
         }
     }
 

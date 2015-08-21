@@ -18,7 +18,6 @@
  */
 package org.elasticsearch.test.engine;
 
-import org.apache.lucene.index.AssertingDirectoryReader;
 import org.apache.lucene.index.DirectoryReader;
 import org.apache.lucene.index.FilterDirectoryReader;
 import org.apache.lucene.index.IndexReader;
@@ -36,7 +35,7 @@ import org.elasticsearch.index.engine.Engine;
 import org.elasticsearch.index.engine.EngineConfig;
 import org.elasticsearch.index.engine.EngineException;
 import org.elasticsearch.index.shard.ShardId;
-import org.elasticsearch.test.ElasticsearchIntegrationTest;
+import org.elasticsearch.test.ESIntegTestCase;
 
 import java.io.Closeable;
 import java.io.IOException;
@@ -79,15 +78,14 @@ public final class MockEngineSupport {
         }
     }
 
-    public MockEngineSupport(EngineConfig config) {
+    public MockEngineSupport(EngineConfig config, Class<? extends FilterDirectoryReader> wrapper) {
         Settings indexSettings = config.getIndexSettings();
         shardId = config.getShardId();
         filterCache = config.getQueryCache();
         filterCachingPolicy = config.getQueryCachingPolicy();
-        final long seed = indexSettings.getAsLong(ElasticsearchIntegrationTest.SETTING_INDEX_SEED, 0l);
+        final long seed = indexSettings.getAsLong(ESIntegTestCase.SETTING_INDEX_SEED, 0l);
         Random random = new Random(seed);
         final double ratio = indexSettings.getAsDouble(WRAP_READER_RATIO, 0.0d); // DISABLED by default - AssertingDR is crazy slow
-        Class<? extends AssertingDirectoryReader> wrapper = indexSettings.getAsClass(READER_WRAPPER_TYPE, AssertingDirectoryReader.class);
         boolean wrapReader = random.nextDouble() < ratio;
         if (logger.isTraceEnabled()) {
             logger.trace("Using [{}] for shard [{}] seed: [{}] wrapReader: [{}]", this.getClass().getName(), shardId, seed, wrapReader);

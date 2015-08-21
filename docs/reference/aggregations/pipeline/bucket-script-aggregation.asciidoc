@@ -1,7 +1,7 @@
 [[search-aggregations-pipeline-bucket-script-aggregation]]
 === Bucket Script Aggregation
 
-coming[2.0.0]
+coming[2.0.0-beta1]
 
 experimental[]
 
@@ -72,7 +72,7 @@ The following snippet calculates the ratio percentage of t-shirt sales compared 
                   }
                 },
                 "t-shirt-percentage": {
-                    "series_arithmetic": {
+                    "bucket_script": {
                         "buckets_paths": { 
                           "tShirtSales": "t-shirts>sales",
                           "totalSales": "total_sales"

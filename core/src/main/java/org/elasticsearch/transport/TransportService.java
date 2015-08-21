@@ -20,6 +20,7 @@
 package org.elasticsearch.transport;
 
 import com.google.common.collect.ImmutableMap;
+import org.elasticsearch.action.admin.cluster.node.liveness.TransportLivenessAction;
 import org.elasticsearch.cluster.node.DiscoveryNode;
 import org.elasticsearch.cluster.settings.ClusterDynamicSettings;
 import org.elasticsearch.cluster.settings.DynamicSettings;
@@ -39,10 +40,7 @@ import org.elasticsearch.node.settings.NodeSettingsService;
 import org.elasticsearch.threadpool.ThreadPool;
 
 import java.io.IOException;
-import java.util.Arrays;
-import java.util.Collections;
-import java.util.LinkedHashMap;
-import java.util.Map;
+import java.util.*;
 import java.util.concurrent.CopyOnWriteArrayList;
 import java.util.concurrent.ScheduledFuture;
 import java.util.concurrent.atomic.AtomicBoolean;
@@ -105,7 +103,7 @@ public class TransportService extends AbstractLifecycleComponent<TransportServic
         this.transport = transport;
         this.threadPool = threadPool;
         this.tracerLogInclude = settings.getAsArray(SETTING_TRACE_LOG_INCLUDE, Strings.EMPTY_ARRAY, true);
-        this.tracelLogExclude = settings.getAsArray(SETTING_TRACE_LOG_EXCLUDE, new String[]{"internal:discovery/zen/fd*"}, true);
+        this.tracelLogExclude = settings.getAsArray(SETTING_TRACE_LOG_EXCLUDE, new String[]{"internal:discovery/zen/fd*", TransportLivenessAction.NAME}, true);
         tracerLog = Loggers.getLogger(logger, ".tracer");
         adapter = createAdapter();
     }
@@ -129,9 +127,7 @@ public class TransportService extends AbstractLifecycleComponent<TransportServic
 
     // These need to be optional as they don't exist in the context of a transport client
     @Inject(optional = true)
-    public void setDynamicSettings(NodeSettingsService nodeSettingsService, @ClusterDynamicSettings DynamicSettings dynamicSettings) {
-        dynamicSettings.addDynamicSettings(SETTING_TRACE_LOG_INCLUDE, SETTING_TRACE_LOG_INCLUDE + ".*");
-        dynamicSettings.addDynamicSettings(SETTING_TRACE_LOG_EXCLUDE, SETTING_TRACE_LOG_EXCLUDE + ".*");
+    public void setDynamicSettings(NodeSettingsService nodeSettingsService) {
         nodeSettingsService.addListener(settingsListener);
     }
 
@@ -220,6 +216,10 @@ public class TransportService extends AbstractLifecycleComponent<TransportServic
 
     public BoundTransportAddress boundAddress() {
         return transport.boundAddress();
+    }
+
+    public List<String> getLocalAddresses() {
+        return transport.getLocalAddresses();
     }
 
     public boolean nodeConnected(DiscoveryNode node) {
@@ -384,8 +384,8 @@ public class TransportService extends AbstractLifecycleComponent<TransportServic
         return requestIds.getAndIncrement();
     }
 
-    public TransportAddress[] addressesFromString(String address) throws Exception {
-        return transport.addressesFromString(address);
+    public TransportAddress[] addressesFromString(String address, int perAddressLimit) throws Exception {
+        return transport.addressesFromString(address, perAddressLimit);
     }
 
     /**

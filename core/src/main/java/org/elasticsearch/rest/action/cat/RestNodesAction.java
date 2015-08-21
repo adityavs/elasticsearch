@@ -48,17 +48,16 @@ import org.elasticsearch.index.refresh.RefreshStats;
 import org.elasticsearch.index.search.stats.SearchStats;
 import org.elasticsearch.index.suggest.stats.SuggestStats;
 import org.elasticsearch.indices.NodeIndicesStats;
-import org.elasticsearch.monitor.fs.FsStats;
+import org.elasticsearch.monitor.fs.FsInfo;
 import org.elasticsearch.monitor.jvm.JvmInfo;
 import org.elasticsearch.monitor.jvm.JvmStats;
-import org.elasticsearch.monitor.os.OsInfo;
 import org.elasticsearch.monitor.os.OsStats;
-import org.elasticsearch.monitor.process.ProcessInfo;
 import org.elasticsearch.monitor.process.ProcessStats;
 import org.elasticsearch.rest.*;
 import org.elasticsearch.rest.action.support.RestActionListener;
 import org.elasticsearch.rest.action.support.RestResponseListener;
 import org.elasticsearch.rest.action.support.RestTable;
+import org.elasticsearch.script.ScriptStats;
 import org.elasticsearch.search.suggest.completion.CompletionStats;
 
 import java.util.Locale;
@@ -74,7 +73,7 @@ public class RestNodesAction extends AbstractCatAction {
     }
 
     @Override
-    void documentation(StringBuilder sb) {
+    protected void documentation(StringBuilder sb) {
         sb.append("/_cat/nodes\n");
     }
 
@@ -94,7 +93,7 @@ public class RestNodesAction extends AbstractCatAction {
                     @Override
                     public void processResponse(final NodesInfoResponse nodesInfoResponse) {
                         NodesStatsRequest nodesStatsRequest = new NodesStatsRequest();
-                        nodesStatsRequest.clear().jvm(true).os(true).fs(true).indices(true).process(true);
+                        nodesStatsRequest.clear().jvm(true).os(true).fs(true).indices(true).process(true).script(true);
                         client.admin().cluster().nodesStats(nodesStatsRequest, new RestResponseListener<NodesStatsResponse>(channel) {
                             @Override
                             public RestResponse buildResponse(NodesStatsResponse nodesStatsResponse) throws Exception {
@@ -108,7 +107,7 @@ public class RestNodesAction extends AbstractCatAction {
     }
 
     @Override
-    Table getTableWithHeader(final RestRequest request) {
+    protected Table getTableWithHeader(final RestRequest request) {
         Table table = new Table();
         table.startHeaders();
         table.addCell("id", "default:false;alias:id,nodeId;desc:unique node id");
@@ -185,6 +184,9 @@ public class RestNodesAction extends AbstractCatAction {
         table.addCell("refresh.total", "alias:rto,refreshTotal;default:false;text-align:right;desc:total refreshes");
         table.addCell("refresh.time", "alias:rti,refreshTime;default:false;text-align:right;desc:time spent in refreshes");
 
+        table.addCell("script.compilations", "alias:scrcc,scriptCompilations;default:false;text-align:right;desc:script compilations");
+        table.addCell("script.cache_evictions", "alias:scrce,scriptCacheEvictions;default:false;text-align:right;desc:script cache evictions");
+
         table.addCell("search.fetch_current", "alias:sfc,searchFetchCurrent;default:false;text-align:right;desc:current fetch phase ops");
         table.addCell("search.fetch_time", "alias:sfti,searchFetchTime;default:false;text-align:right;desc:time spent in fetch phase");
         table.addCell("search.fetch_total", "alias:sfto,searchFetchTotal;default:false;text-align:right;desc:total fetch ops");
@@ -192,6 +194,9 @@ public class RestNodesAction extends AbstractCatAction {
         table.addCell("search.query_current", "alias:sqc,searchQueryCurrent;default:false;text-align:right;desc:current query phase ops");
         table.addCell("search.query_time", "alias:sqti,searchQueryTime;default:false;text-align:right;desc:time spent in query phase");
         table.addCell("search.query_total", "alias:sqto,searchQueryTotal;default:false;text-align:right;desc:total query phase ops");
+        table.addCell("search.scroll_current", "alias:scc,searchScrollCurrent;default:false;text-align:right;desc:open scroll contexts");
+        table.addCell("search.scroll_time", "alias:scti,searchScrollTime;default:false;text-align:right;desc:time scroll contexts held open");
+        table.addCell("search.scroll_total", "alias:scto,searchScrollTotal;default:false;text-align:right;desc:completed scroll contexts");
 
         table.addCell("segments.count", "alias:sc,segmentsCount;default:false;text-align:right;desc:number of segments");
         table.addCell("segments.memory", "alias:sm,segmentsMemory;default:false;text-align:right;desc:memory used by segments");
@@ -220,11 +225,8 @@ public class RestNodesAction extends AbstractCatAction {
             NodeStats stats = nodesStats.getNodesMap().get(node.id());
 
             JvmInfo jvmInfo = info == null ? null : info.getJvm();
-            OsInfo osInfo = info == null ? null : info.getOs();
-            ProcessInfo processInfo = info == null ? null : info.getProcess();
-
             JvmStats jvmStats = stats == null ? null : stats.getJvm();
-            FsStats fsStats = stats == null ? null : stats.getFs();
+            FsInfo fsInfo = stats == null ? null : stats.getFs();
             OsStats osStats = stats == null ? null : stats.getOs();
             ProcessStats processStats = stats == null ? null : stats.getProcess();
             NodeIndicesStats indicesStats = stats == null ? null : stats.getIndices();
@@ -232,7 +234,7 @@ public class RestNodesAction extends AbstractCatAction {
             table.startRow();
 
             table.addCell(fullId ? node.id() : Strings.substring(node.getId(), 0, 4));
-            table.addCell(info == null ? null : info.getProcess().id());
+            table.addCell(info == null ? null : info.getProcess().getId());
             table.addCell(node.getHostName());
             table.addCell(node.getHostAddress());
             if (node.address() instanceof InetSocketTransportAddress) {
@@ -244,19 +246,18 @@ public class RestNodesAction extends AbstractCatAction {
             table.addCell(node.getVersion().number());
             table.addCell(info == null ? null : info.getBuild().hashShort());
             table.addCell(jvmInfo == null ? null : jvmInfo.version());
-            table.addCell(fsStats == null ? null : fsStats.getTotal().getAvailable());
+            table.addCell(fsInfo == null ? null : fsInfo.getTotal().getAvailable());
             table.addCell(jvmStats == null ? null : jvmStats.getMem().getHeapUsed());
             table.addCell(jvmStats == null ? null : jvmStats.getMem().getHeapUsedPercent());
             table.addCell(jvmInfo == null ? null : jvmInfo.getMem().getHeapMax());
-            table.addCell(osStats == null ? null : osStats.getMem() == null ? null : osStats.getMem().used());
-            table.addCell(osStats == null ? null : osStats.getMem() == null ? null : osStats.getMem().usedPercent());
-            table.addCell(osInfo == null ? null : osInfo.getMem() == null ? null : osInfo.getMem().total()); // sigar fails to load in IntelliJ
+            table.addCell(osStats == null ? null : osStats.getMem() == null ? null : osStats.getMem().getUsed());
+            table.addCell(osStats == null ? null : osStats.getMem() == null ? null : osStats.getMem().getUsedPercent());
+            table.addCell(osStats == null ? null : osStats.getMem() == null ? null : osStats.getMem().getTotal());
             table.addCell(processStats == null ? null : processStats.getOpenFileDescriptors());
-            table.addCell(processStats == null || processInfo == null ? null :
-                          calculatePercentage(processStats.getOpenFileDescriptors(), processInfo.getMaxFileDescriptors()));
-            table.addCell(processInfo == null ? null : processInfo.getMaxFileDescriptors());
+            table.addCell(processStats == null ? null : calculatePercentage(processStats.getOpenFileDescriptors(), processStats.getMaxFileDescriptors()));
+            table.addCell(processStats == null ? null : processStats.getMaxFileDescriptors());
 
-            table.addCell(osStats == null ? null : osStats.getLoadAverage().length < 1 ? null : String.format(Locale.ROOT, "%.2f", osStats.getLoadAverage()[0]));
+            table.addCell(osStats == null ? null : String.format(Locale.ROOT, "%.2f", osStats.getLoadAverage()));
             table.addCell(jvmStats == null ? null : jvmStats.getUptime());
             table.addCell(node.clientNode() ? "c" : node.dataNode() ? "d" : "-");
             table.addCell(masterId == null ? "x" : masterId.equals(node.id()) ? "*" : node.masterNode() ? "m" : "-");
@@ -320,6 +321,10 @@ public class RestNodesAction extends AbstractCatAction {
             table.addCell(refreshStats == null ? null : refreshStats.getTotal());
             table.addCell(refreshStats == null ? null : refreshStats.getTotalTime());
 
+            ScriptStats scriptStats = stats == null ? null : stats.getScriptStats();
+            table.addCell(scriptStats == null ? null : scriptStats.getCompilations());
+            table.addCell(scriptStats == null ? null : scriptStats.getCacheEvictions());
+
             SearchStats searchStats = indicesStats == null ? null : indicesStats.getSearch();
             table.addCell(searchStats == null ? null : searchStats.getTotal().getFetchCurrent());
             table.addCell(searchStats == null ? null : searchStats.getTotal().getFetchTime());
@@ -328,6 +333,9 @@ public class RestNodesAction extends AbstractCatAction {
             table.addCell(searchStats == null ? null : searchStats.getTotal().getQueryCurrent());
             table.addCell(searchStats == null ? null : searchStats.getTotal().getQueryTime());
             table.addCell(searchStats == null ? null : searchStats.getTotal().getQueryCount());
+            table.addCell(searchStats == null ? null : searchStats.getTotal().getScrollCurrent());
+            table.addCell(searchStats == null ? null : searchStats.getTotal().getScrollTime());
+            table.addCell(searchStats == null ? null : searchStats.getTotal().getScrollCount());
 
             SegmentsStats segmentsStats = indicesStats == null ? null : indicesStats.getSegments();
             table.addCell(segmentsStats == null ? null : segmentsStats.getCount());

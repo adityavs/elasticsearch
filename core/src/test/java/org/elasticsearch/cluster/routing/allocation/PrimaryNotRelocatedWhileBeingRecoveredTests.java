@@ -28,7 +28,7 @@ import org.elasticsearch.cluster.routing.RoutingNodes;
 import org.elasticsearch.cluster.routing.RoutingTable;
 import org.elasticsearch.common.logging.ESLogger;
 import org.elasticsearch.common.logging.Loggers;
-import org.elasticsearch.test.ElasticsearchAllocationTestCase;
+import org.elasticsearch.test.ESAllocationTestCase;
 import org.junit.Test;
 
 import static org.elasticsearch.cluster.routing.ShardRoutingState.INITIALIZING;
@@ -39,7 +39,7 @@ import static org.hamcrest.Matchers.equalTo;
 /**
  *
  */
-public class PrimaryNotRelocatedWhileBeingRecoveredTests extends ElasticsearchAllocationTestCase {
+public class PrimaryNotRelocatedWhileBeingRecoveredTests extends ESAllocationTestCase {
 
     private final ESLogger logger = Loggers.getLogger(PrimaryNotRelocatedWhileBeingRecoveredTests.class);
 
@@ -69,7 +69,7 @@ public class PrimaryNotRelocatedWhileBeingRecoveredTests extends ElasticsearchAl
         clusterState = ClusterState.builder(clusterState).routingTable(routingTable).build();
 
         logger.info("Start the primary shard (on node1)");
-        RoutingNodes routingNodes = clusterState.routingNodes();
+        RoutingNodes routingNodes = clusterState.getRoutingNodes();
         routingTable = strategy.applyStartedShards(clusterState, routingNodes.node("node1").shardsWithState(INITIALIZING)).routingTable();
         clusterState = ClusterState.builder(clusterState).routingTable(routingTable).build();
 

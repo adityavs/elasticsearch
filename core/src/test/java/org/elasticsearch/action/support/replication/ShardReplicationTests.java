@@ -38,6 +38,7 @@ import org.elasticsearch.cluster.block.ClusterBlockException;
 import org.elasticsearch.cluster.block.ClusterBlockLevel;
 import org.elasticsearch.cluster.block.ClusterBlocks;
 import org.elasticsearch.cluster.metadata.IndexMetaData;
+import org.elasticsearch.cluster.metadata.IndexNameExpressionResolver;
 import org.elasticsearch.cluster.metadata.MetaData;
 import org.elasticsearch.cluster.node.DiscoveryNode;
 import org.elasticsearch.cluster.node.DiscoveryNodes;
@@ -53,7 +54,7 @@ import org.elasticsearch.index.shard.IndexShardNotStartedException;
 import org.elasticsearch.index.shard.IndexShardState;
 import org.elasticsearch.index.shard.ShardId;
 import org.elasticsearch.rest.RestStatus;
-import org.elasticsearch.test.ElasticsearchTestCase;
+import org.elasticsearch.test.ESTestCase;
 import org.elasticsearch.test.cluster.TestClusterService;
 import org.elasticsearch.test.transport.CapturingTransport;
 import org.elasticsearch.threadpool.ThreadPool;
@@ -79,7 +80,7 @@ import java.util.concurrent.atomic.AtomicInteger;
 import static org.elasticsearch.cluster.metadata.IndexMetaData.*;
 import static org.hamcrest.Matchers.*;
 
-public class ShardReplicationTests extends ElasticsearchTestCase {
+public class ShardReplicationTests extends ESTestCase {
 
     private static ThreadPool threadPool;
 
@@ -207,7 +208,7 @@ public class ShardReplicationTests extends ElasticsearchTestCase {
 
         RoutingTable.Builder routing = new RoutingTable.Builder();
         routing.addAsNew(indexMetaData);
-        IndexShardRoutingTable.Builder indexShardRoutingBuilder = new IndexShardRoutingTable.Builder(shardId, false);
+        IndexShardRoutingTable.Builder indexShardRoutingBuilder = new IndexShardRoutingTable.Builder(shardId);
 
         String primaryNode = null;
         String relocatingNode = null;
@@ -225,7 +226,7 @@ public class ShardReplicationTests extends ElasticsearchTestCase {
         } else {
             unassignedInfo = new UnassignedInfo(UnassignedInfo.Reason.INDEX_CREATED, null);
         }
-        indexShardRoutingBuilder.addShard(new ShardRouting(index, 0, primaryNode, relocatingNode, null, true, primaryState, 0, unassignedInfo));
+        indexShardRoutingBuilder.addShard(TestShardRouting.newShardRouting(index, 0, primaryNode, relocatingNode, null, true, primaryState, 0, unassignedInfo));
 
         for (ShardRoutingState replicaState : replicaStates) {
             String replicaNode = null;
@@ -241,12 +242,12 @@ public class ShardReplicationTests extends ElasticsearchTestCase {
                 unassignedInfo = new UnassignedInfo(UnassignedInfo.Reason.INDEX_CREATED, null);
             }
             indexShardRoutingBuilder.addShard(
-                    new ShardRouting(index, shardId.id(), replicaNode, relocatingNode, null, false, replicaState, 0, unassignedInfo));
+                    TestShardRouting.newShardRouting(index, shardId.id(), replicaNode, relocatingNode, null, false, replicaState, 0, unassignedInfo));
         }
 
         ClusterState.Builder state = ClusterState.builder(new ClusterName("test"));
         state.nodes(discoBuilder);
-        state.metaData(MetaData.builder().put(indexMetaData, false).generateUuidIfNeeded());
+        state.metaData(MetaData.builder().put(indexMetaData, false).generateClusterUuidIfNeeded());
         state.routingTable(RoutingTable.builder().add(IndexRoutingTable.builder(index).addIndexShard(indexShardRoutingBuilder.build())));
         return state.build();
     }
@@ -693,7 +694,7 @@ public class ShardReplicationTests extends ElasticsearchTestCase {
                ThreadPool threadPool) {
             super(settings, actionName, transportService, clusterService, null, threadPool,
                     new ShardStateAction(settings, clusterService, transportService, null, null), null,
-                    new ActionFilters(new HashSet<ActionFilter>()), Request.class, Request.class, ThreadPool.Names.SAME);
+                    new ActionFilters(new HashSet<ActionFilter>()), new IndexNameExpressionResolver(Settings.EMPTY), Request.class, Request.class, ThreadPool.Names.SAME);
         }
 
         @Override

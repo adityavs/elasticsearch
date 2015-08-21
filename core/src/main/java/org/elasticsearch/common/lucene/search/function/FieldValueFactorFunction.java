@@ -91,6 +91,11 @@ public class FieldValueFactorFunction extends ScoreFunction {
         };
     }
 
+    @Override
+    public boolean needsScores() {
+        return false;
+    }
+
     /**
      * The Type class encapsulates the modification types that can be applied
      * to the score/value product.
@@ -161,9 +166,6 @@ public class FieldValueFactorFunction extends ScoreFunction {
 
         @Override
         public String toString() {
-            if (this == NONE) {
-                return "";
-            }
             return super.toString().toLowerCase(Locale.ROOT);
         }
     }

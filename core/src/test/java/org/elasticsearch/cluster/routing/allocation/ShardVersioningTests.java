@@ -29,14 +29,14 @@ import org.elasticsearch.cluster.routing.RoutingTable;
 import org.elasticsearch.cluster.routing.allocation.decider.ClusterRebalanceAllocationDecider;
 import org.elasticsearch.common.logging.ESLogger;
 import org.elasticsearch.common.logging.Loggers;
-import org.elasticsearch.test.ElasticsearchAllocationTestCase;
+import org.elasticsearch.test.ESAllocationTestCase;
 import org.junit.Test;
 
 import static org.elasticsearch.cluster.routing.ShardRoutingState.*;
 import static org.elasticsearch.common.settings.Settings.settingsBuilder;
 import static org.hamcrest.Matchers.equalTo;
 
-public class ShardVersioningTests extends ElasticsearchAllocationTestCase {
+public class ShardVersioningTests extends ESAllocationTestCase {
 
     private final ESLogger logger = Loggers.getLogger(ShardVersioningTests.class);
 
@@ -78,11 +78,11 @@ public class ShardVersioningTests extends ElasticsearchAllocationTestCase {
         }
 
         logger.info("start all the primary shards for test1, replicas will start initializing");
-        RoutingNodes routingNodes = clusterState.routingNodes();
+        RoutingNodes routingNodes = clusterState.getRoutingNodes();
         prevRoutingTable = routingTable;
         routingTable = strategy.applyStartedShards(clusterState, routingNodes.shardsWithState("test1", INITIALIZING)).routingTable();
         clusterState = ClusterState.builder(clusterState).routingTable(routingTable).build();
-        routingNodes = clusterState.routingNodes();
+        routingNodes = clusterState.getRoutingNodes();
 
         for (int i = 0; i < routingTable.index("test1").shards().size(); i++) {
             assertThat(routingTable.index("test1").shard(i).shards().size(), equalTo(2));

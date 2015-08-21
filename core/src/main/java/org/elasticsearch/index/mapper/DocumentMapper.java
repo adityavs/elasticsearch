@@ -41,7 +41,6 @@ import org.elasticsearch.common.util.concurrent.ReleasableLock;
 import org.elasticsearch.common.xcontent.ToXContent;
 import org.elasticsearch.common.xcontent.XContentBuilder;
 import org.elasticsearch.common.xcontent.XContentType;
-import org.elasticsearch.index.fielddata.FieldDataType;
 import org.elasticsearch.index.mapper.Mapping.SourceTransform;
 import org.elasticsearch.index.mapper.internal.AllFieldMapper;
 import org.elasticsearch.index.mapper.internal.FieldNamesFieldMapper;
@@ -49,7 +48,6 @@ import org.elasticsearch.index.mapper.internal.IdFieldMapper;
 import org.elasticsearch.index.mapper.internal.IndexFieldMapper;
 import org.elasticsearch.index.mapper.internal.ParentFieldMapper;
 import org.elasticsearch.index.mapper.internal.RoutingFieldMapper;
-import org.elasticsearch.index.mapper.internal.SizeFieldMapper;
 import org.elasticsearch.index.mapper.internal.SourceFieldMapper;
 import org.elasticsearch.index.mapper.internal.TTLFieldMapper;
 import org.elasticsearch.index.mapper.internal.TimestampFieldMapper;
@@ -81,11 +79,9 @@ public class DocumentMapper implements ToXContent {
 
     public static class Builder {
 
-        private Map<Class<? extends RootMapper>, RootMapper> rootMappers = new LinkedHashMap<>();
+        private Map<Class<? extends MetadataFieldMapper>, MetadataFieldMapper> rootMappers = new LinkedHashMap<>();
 
         private List<SourceTransform> sourceTransforms = new ArrayList<>(1);
-
-        private final String index;
 
         private final Settings indexSettings;
 
@@ -95,8 +91,7 @@ public class DocumentMapper implements ToXContent {
 
         private final Mapper.BuilderContext builderContext;
 
-        public Builder(String index, Settings indexSettings, RootObjectMapper.Builder builder, MapperService mapperService) {
-            this.index = index;
+        public Builder(Settings indexSettings, RootObjectMapper.Builder builder, MapperService mapperService) {
             this.indexSettings = indexSettings;
             this.builderContext = new Mapper.BuilderContext(indexSettings, new ContentPath(1));
             this.rootObjectMapper = builder.build(builderContext);
@@ -110,7 +105,6 @@ public class DocumentMapper implements ToXContent {
             this.rootMappers.put(IdFieldMapper.class, new IdFieldMapper(indexSettings, mapperService.fullName(IdFieldMapper.NAME)));
             this.rootMappers.put(RoutingFieldMapper.class, new RoutingFieldMapper(indexSettings, mapperService.fullName(RoutingFieldMapper.NAME)));
             // add default mappers, order is important (for example analyzer should come before the rest to set context.analyzer)
-            this.rootMappers.put(SizeFieldMapper.class, new SizeFieldMapper(indexSettings, mapperService.fullName(SizeFieldMapper.NAME)));
             this.rootMappers.put(IndexFieldMapper.class, new IndexFieldMapper(indexSettings, mapperService.fullName(IndexFieldMapper.NAME)));
             this.rootMappers.put(SourceFieldMapper.class, new SourceFieldMapper(indexSettings));
             this.rootMappers.put(TypeFieldMapper.class, new TypeFieldMapper(indexSettings, mapperService.fullName(TypeFieldMapper.NAME)));
@@ -128,9 +122,9 @@ public class DocumentMapper implements ToXContent {
             return this;
         }
 
-        public Builder put(RootMapper.Builder mapper) {
-            RootMapper rootMapper = (RootMapper) mapper.build(builderContext);
-            rootMappers.put(rootMapper.getClass(), rootMapper);
+        public Builder put(MetadataFieldMapper.Builder<?, ?> mapper) {
+            MetadataFieldMapper metadataMapper = mapper.build(builderContext);
+            rootMappers.put(metadataMapper.getClass(), metadataMapper);
             return this;
         }
 
@@ -151,7 +145,7 @@ public class DocumentMapper implements ToXContent {
 
         public DocumentMapper build(MapperService mapperService, DocumentMapperParser docMapperParser) {
             Preconditions.checkNotNull(rootObjectMapper, "Mapper builder must have the root object mapper set");
-            return new DocumentMapper(mapperService, index, indexSettings, docMapperParser, rootObjectMapper, meta, rootMappers, sourceTransforms, mapperService.mappingLock);
+            return new DocumentMapper(mapperService, indexSettings, docMapperParser, rootObjectMapper, meta, rootMappers, sourceTransforms, mapperService.mappingLock);
         }
     }
 
@@ -172,15 +166,13 @@ public class DocumentMapper implements ToXContent {
 
     private boolean hasNestedObjects = false;
 
-    private final Query typeFilter;
-
     private final ReleasableLock mappingWriteLock;
     private final ReentrantReadWriteLock mappingLock;
 
-    public DocumentMapper(MapperService mapperService, String index, @Nullable Settings indexSettings, DocumentMapperParser docMapperParser,
+    public DocumentMapper(MapperService mapperService, @Nullable Settings indexSettings, DocumentMapperParser docMapperParser,
                           RootObjectMapper rootObjectMapper,
                           ImmutableMap<String, Object> meta,
-                          Map<Class<? extends RootMapper>, RootMapper> rootMappers,
+                          Map<Class<? extends MetadataFieldMapper>, MetadataFieldMapper> rootMappers,
                           List<SourceTransform> sourceTransforms,
                           ReentrantReadWriteLock mappingLock) {
         this.mapperService = mapperService;
@@ -189,12 +181,11 @@ public class DocumentMapper implements ToXContent {
         this.mapping = new Mapping(
                 Version.indexCreated(indexSettings),
                 rootObjectMapper,
-                rootMappers.values().toArray(new RootMapper[rootMappers.values().size()]),
+                rootMappers.values().toArray(new MetadataFieldMapper[rootMappers.values().size()]),
                 sourceTransforms.toArray(new SourceTransform[sourceTransforms.size()]),
                 meta);
-        this.documentParser = new DocumentParser(index, indexSettings, docMapperParser, this, new ReleasableLock(mappingLock.readLock()));
+        this.documentParser = new DocumentParser(indexSettings, docMapperParser, this, new ReleasableLock(mappingLock.readLock()));
 
-        this.typeFilter = typeMapper().fieldType().termQuery(type, null);
         this.mappingWriteLock = new ReleasableLock(mappingLock.writeLock());
         this.mappingLock = mappingLock;
 
@@ -206,9 +197,9 @@ public class DocumentMapper implements ToXContent {
         // collect all the mappers for this type
         List<ObjectMapper> newObjectMappers = new ArrayList<>();
         List<FieldMapper> newFieldMappers = new ArrayList<>();
-        for (RootMapper rootMapper : this.mapping.rootMappers) {
-            if (rootMapper instanceof FieldMapper) {
-                newFieldMappers.add((FieldMapper) rootMapper);
+        for (MetadataFieldMapper metadataMapper : this.mapping.metadataMappers) {
+            if (metadataMapper instanceof FieldMapper) {
+                newFieldMappers.add((FieldMapper) metadataMapper);
             }
         }
         MapperUtils.collect(this.mapping.root, newObjectMappers, newFieldMappers);
@@ -258,7 +249,7 @@ public class DocumentMapper implements ToXContent {
     }
 
     @SuppressWarnings({"unchecked"})
-    public <T extends RootMapper> T rootMapper(Class<T> type) {
+    public <T extends MetadataFieldMapper> T rootMapper(Class<T> type) {
         return mapping.rootMapper(type);
     }
 
@@ -290,10 +281,6 @@ public class DocumentMapper implements ToXContent {
         return rootMapper(ParentFieldMapper.class);
     }
 
-    public SizeFieldMapper sizeFieldMapper() {
-        return rootMapper(SizeFieldMapper.class);
-    }
-
     public TimestampFieldMapper timestampFieldMapper() {
         return rootMapper(TimestampFieldMapper.class);
     }
@@ -306,12 +293,8 @@ public class DocumentMapper implements ToXContent {
         return rootMapper(IndexFieldMapper.class);
     }
 
-    public SizeFieldMapper SizeFieldMapper() {
-        return rootMapper(SizeFieldMapper.class);
-    }
-
     public Query typeFilter() {
-        return this.typeFilter;
+        return typeMapper().fieldType().termQuery(type, null);
     }
 
     public boolean hasNestedObjects() {
@@ -326,8 +309,8 @@ public class DocumentMapper implements ToXContent {
         return this.objectMappers;
     }
 
-    public ParsedDocument parse(String type, String id, BytesReference source) throws MapperParsingException {
-        return parse(SourceToParse.source(source).type(type).id(id));
+    public ParsedDocument parse(String index, String type, String id, BytesReference source) throws MapperParsingException {
+        return parse(SourceToParse.source(source).index(index).type(type).id(id));
     }
 
     public ParsedDocument parse(SourceToParse source) throws MapperParsingException {
@@ -400,10 +383,10 @@ public class DocumentMapper implements ToXContent {
         return mapperService.getParentTypes().contains(type);
     }
 
-    private void addMappers(Collection<ObjectMapper> objectMappers, Collection<FieldMapper> fieldMappers) {
+    private void addMappers(Collection<ObjectMapper> objectMappers, Collection<FieldMapper> fieldMappers, boolean updateAllTypes) {
         assert mappingLock.isWriteLockedByCurrentThread();
         // first ensure we don't have any incompatible new fields
-        mapperService.checkNewMappersCompatibility(objectMappers, fieldMappers, true);
+        mapperService.checkNewMappersCompatibility(objectMappers, fieldMappers, updateAllTypes);
 
         // update mappers for this document type
         MapBuilder<String, ObjectMapper> builder = MapBuilder.newMapBuilder(this.objectMappers);
@@ -425,7 +408,7 @@ public class DocumentMapper implements ToXContent {
             final MergeResult mergeResult = new MergeResult(simulate, updateAllTypes);
             this.mapping.merge(mapping, mergeResult);
             if (simulate == false) {
-                addMappers(mergeResult.getNewObjectMappers(), mergeResult.getNewFieldMappers());
+                addMappers(mergeResult.getNewObjectMappers(), mergeResult.getNewFieldMappers(), updateAllTypes);
                 refreshSource();
             }
             return mergeResult;

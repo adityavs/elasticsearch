@@ -26,7 +26,7 @@ import org.elasticsearch.common.transport.LocalTransportAddress;
 import org.elasticsearch.index.IndexService;
 import org.elasticsearch.index.shard.IndexShard;
 import org.elasticsearch.index.store.StoreFileMetaData;
-import org.elasticsearch.test.ElasticsearchSingleNodeTest;
+import org.elasticsearch.test.ESSingleNodeTestCase;
 
 import java.io.IOException;
 import java.util.Set;
@@ -34,7 +34,7 @@ import java.util.regex.Pattern;
 
 /**
  */
-public class RecoveryStatusTests extends ElasticsearchSingleNodeTest {
+public class RecoveryStatusTests extends ESSingleNodeTestCase {
     
     public void testRenameTempFiles() throws IOException {
         IndexService service = createIndex("foo");
@@ -55,6 +55,13 @@ public class RecoveryStatusTests extends ElasticsearchSingleNodeTest {
             IndexOutput openIndexOutput = status.getOpenIndexOutput("foo.bar");
             assertSame(openIndexOutput, indexOutput);
             openIndexOutput.writeInt(1);
+        }
+        try {
+            status.openAndPutIndexOutput("foo.bar", new StoreFileMetaData("foo.bar", 8), status.store());
+            fail("file foo.bar is already opened and registered");
+        } catch (IllegalStateException ex) {
+            assertEquals("output for file [foo.bar] has already been created", ex.getMessage());
+            // all well = it's already registered
         }
         status.removeOpenIndexOutputs("foo.bar");
         Set<String> strings = Sets.newHashSet(status.store().directory().listAll());

@@ -36,12 +36,12 @@ import org.elasticsearch.index.mapper.DocumentMapper;
 import org.elasticsearch.index.mapper.DocumentMapperParser;
 import org.elasticsearch.index.mapper.FieldMapper;
 import org.elasticsearch.index.mapper.ParsedDocument;
-import org.elasticsearch.test.ElasticsearchSingleNodeTest;
+import org.elasticsearch.test.ESSingleNodeTestCase;
 import org.junit.Before;
 
 import java.io.IOException;
 
-public class BooleanFieldMapperTests extends ElasticsearchSingleNodeTest {
+public class BooleanFieldMapperTests extends ESSingleNodeTestCase {
 
     IndexService indexService;
     DocumentMapperParser parser;
@@ -59,7 +59,7 @@ public class BooleanFieldMapperTests extends ElasticsearchSingleNodeTest {
 
         DocumentMapper defaultMapper = parser.parse(mapping);
 
-        ParsedDocument doc = defaultMapper.parse("type", "1", XContentFactory.jsonBuilder()
+        ParsedDocument doc = defaultMapper.parse("test", "type", "1", XContentFactory.jsonBuilder()
                 .startObject()
                 .field("field", true)
                 .endObject()

@@ -24,26 +24,27 @@ import org.elasticsearch.action.admin.cluster.repositories.put.PutRepositoryResp
 import org.elasticsearch.action.admin.cluster.snapshots.create.CreateSnapshotResponse;
 import org.elasticsearch.action.admin.cluster.snapshots.restore.RestoreSnapshotResponse;
 import org.elasticsearch.client.Client;
+import org.elasticsearch.cloud.azure.AbstractAzureRepositoryServiceTest;
 import org.elasticsearch.cloud.azure.storage.AzureStorageServiceMock;
 import org.elasticsearch.cluster.ClusterState;
 import org.elasticsearch.common.settings.Settings;
 import org.elasticsearch.common.unit.ByteSizeUnit;
 import org.elasticsearch.snapshots.SnapshotState;
-import org.elasticsearch.test.ElasticsearchIntegrationTest;
+import org.elasticsearch.test.ESIntegTestCase;
 import org.junit.Test;
 
 import static org.hamcrest.Matchers.equalTo;
 import static org.hamcrest.Matchers.greaterThan;
 
-@ElasticsearchIntegrationTest.ClusterScope(
-        scope = ElasticsearchIntegrationTest.Scope.SUITE,
+@ESIntegTestCase.ClusterScope(
+        scope = ESIntegTestCase.Scope.SUITE,
         numDataNodes = 1,
         numClientNodes = 0,
         transportClientRatio = 0.0)
 public class AzureSnapshotRestoreTest extends AbstractAzureRepositoryServiceTest {
 
     public AzureSnapshotRestoreTest() {
-        super(AzureStorageServiceMock.class, "/snapshot-test/repo-" + randomInt());
+        super("/snapshot-test/repo-" + randomInt());
     }
 
     @Test

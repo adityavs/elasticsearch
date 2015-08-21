@@ -30,19 +30,19 @@ import org.elasticsearch.client.Requests;
 import org.elasticsearch.common.Strings;
 import org.elasticsearch.common.bytes.BytesArray;
 import org.elasticsearch.script.Script;
-import org.elasticsearch.test.ElasticsearchTestCase;
+import org.elasticsearch.test.ESTestCase;
 import org.junit.Test;
 
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
 
-import static org.elasticsearch.common.io.Streams.copyToStringFromClasspath;
+import static org.elasticsearch.test.StreamsUtils.copyToStringFromClasspath;
 import static org.hamcrest.Matchers.equalTo;
 import static org.hamcrest.Matchers.instanceOf;
 import static org.hamcrest.Matchers.notNullValue;
 
-public class BulkRequestTests extends ElasticsearchTestCase {
+public class BulkRequestTests extends ESTestCase {
 
     @Test
     public void testSimpleBulk1() throws Exception {

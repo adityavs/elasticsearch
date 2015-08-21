@@ -71,6 +71,7 @@ curl -XPOST 'localhost:9200/_search' -d '{
 }'
 --------------------------------------------------
 
+[[nested-sorting]]
 ==== Sorting within nested objects.
 
 Elasticsearch also supports sorting by
@@ -166,6 +167,7 @@ If any of the indices that are queried doesn't have a mapping for `price`
 then Elasticsearch will handle it as if there was a mapping of type
 `long`, with all documents in this index having no value for this field.
 
+[[geo-sorting]]
 ==== Geo Distance Sorting
 
 Allow to sort by `_geo_distance`. Here is an example:
@@ -360,5 +362,5 @@ When sorting, the relevant sorted field values are loaded into memory.
 This means that per shard, there should be enough memory to contain
 them. For string based types, the field sorted on should not be analyzed
 / tokenized. For numeric types, if possible, it is recommended to
-explicitly set the type to six_hun types (like `short`, `integer` and
+explicitly set the type to narrower types (like `short`, `integer` and
 `float`).

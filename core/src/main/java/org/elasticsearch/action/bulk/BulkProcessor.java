@@ -145,6 +145,10 @@ public class BulkProcessor implements Closeable {
     }
 
     public static Builder builder(Client client, Listener listener) {
+        if (client == null) {
+            throw new NullPointerException("The client you specified while building a BulkProcessor is null");
+        }
+        
         return new Builder(client, listener);
     }
 
@@ -285,7 +289,7 @@ public class BulkProcessor implements Closeable {
     }
 
     public synchronized BulkProcessor add(BytesReference data, @Nullable String defaultIndex, @Nullable String defaultType, @Nullable Object payload) throws Exception {
-        bulkRequest.add(data, defaultIndex, defaultType, null, payload, true);
+        bulkRequest.add(data, defaultIndex, defaultType, null, null, payload, true);
         executeIfNeeded();
         return this;
     }

@@ -47,7 +47,7 @@ import org.elasticsearch.monitor.MonitorService;
 import org.elasticsearch.node.internal.InternalSettingsPreparer;
 import org.elasticsearch.plugins.PluginsModule;
 import org.elasticsearch.plugins.PluginsService;
-import org.elasticsearch.search.TransportSearchModule;
+import org.elasticsearch.search.SearchModule;
 import org.elasticsearch.threadpool.ThreadPool;
 import org.elasticsearch.threadpool.ThreadPoolModule;
 import org.elasticsearch.transport.TransportModule;
@@ -138,8 +138,13 @@ public class TransportClient extends AbstractClient {
                 modules.add(new NetworkModule());
                 modules.add(new ClusterNameModule(this.settings));
                 modules.add(new ThreadPoolModule(threadPool));
-                modules.add(new TransportSearchModule());
                 modules.add(new TransportModule(this.settings));
+                modules.add(new SearchModule(this.settings) {
+                    @Override
+                    protected void configure() {
+                        // noop
+                    }
+                });
                 modules.add(new ActionModule(true));
                 modules.add(new ClientTransportModule());
                 modules.add(new CircuitBreakerModule(this.settings));
@@ -255,7 +260,7 @@ public class TransportClient extends AbstractClient {
             // ignore, might not be bounded
         }
 
-        for (Class<? extends LifecycleComponent> plugin : injector.getInstance(PluginsService.class).services()) {
+        for (Class<? extends LifecycleComponent> plugin : injector.getInstance(PluginsService.class).nodeServices()) {
             injector.getInstance(plugin).close();
         }
         try {

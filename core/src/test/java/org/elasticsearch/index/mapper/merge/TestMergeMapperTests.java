@@ -23,7 +23,6 @@ import org.elasticsearch.common.bytes.BytesArray;
 import org.elasticsearch.common.bytes.BytesReference;
 import org.elasticsearch.common.compress.CompressedXContent;
 import org.elasticsearch.common.xcontent.XContentFactory;
-import org.elasticsearch.index.analysis.FieldNameAnalyzer;
 import org.elasticsearch.index.analysis.NamedAnalyzer;
 import org.elasticsearch.index.mapper.DocumentFieldMappers;
 import org.elasticsearch.index.mapper.DocumentMapper;
@@ -34,8 +33,7 @@ import org.elasticsearch.index.mapper.MergeResult;
 import org.elasticsearch.index.mapper.ParsedDocument;
 import org.elasticsearch.index.mapper.core.StringFieldMapper;
 import org.elasticsearch.index.mapper.object.ObjectMapper;
-import org.elasticsearch.test.ElasticsearchSingleNodeTest;
-import org.junit.Test;
+import org.elasticsearch.test.ESSingleNodeTestCase;
 
 import java.util.concurrent.CyclicBarrier;
 import java.util.concurrent.atomic.AtomicBoolean;
@@ -45,7 +43,7 @@ import static org.hamcrest.Matchers.equalTo;
 import static org.hamcrest.Matchers.notNullValue;
 import static org.hamcrest.Matchers.nullValue;
 
-public class TestMergeMapperTests extends ElasticsearchSingleNodeTest {
+public class TestMergeMapperTests extends ESSingleNodeTestCase {
 
     public void test1Merge() throws Exception {
 
@@ -174,7 +172,7 @@ public class TestMergeMapperTests extends ElasticsearchSingleNodeTest {
                     barrier.await();
                     for (int i = 0; i < 200 && stopped.get() == false; i++) {
                         final String fieldName = Integer.toString(i);
-                        ParsedDocument doc = documentMapper.parse("test", fieldName, new BytesArray("{ \"" + fieldName + "\" : \"test\" }"));
+                        ParsedDocument doc = documentMapper.parse("test", "test", fieldName, new BytesArray("{ \"" + fieldName + "\" : \"test\" }"));
                         Mapping update = doc.dynamicMappingsUpdate();
                         assert update != null;
                         lastIntroducedFieldName.set(fieldName);
@@ -193,7 +191,7 @@ public class TestMergeMapperTests extends ElasticsearchSingleNodeTest {
             while(stopped.get() == false) {
                 final String fieldName = lastIntroducedFieldName.get();
                 final BytesReference source = new BytesArray("{ \"" + fieldName + "\" : \"test\" }");
-                ParsedDocument parsedDoc = documentMapper.parse("test", "random", source);
+                ParsedDocument parsedDoc = documentMapper.parse("test", "test", "random", source);
                 if (parsedDoc.dynamicMappingsUpdate() != null) {
                     // not in the mapping yet, try again
                     continue;

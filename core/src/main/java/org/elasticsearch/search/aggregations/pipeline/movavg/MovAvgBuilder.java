@@ -25,6 +25,7 @@ import org.elasticsearch.search.aggregations.pipeline.PipelineAggregatorBuilder;
 import org.elasticsearch.search.aggregations.pipeline.movavg.models.MovAvgModelBuilder;
 
 import java.io.IOException;
+import java.util.Map;
 
 /**
  * A builder to create MovingAvg pipeline aggregations
@@ -36,6 +37,8 @@ public class MovAvgBuilder extends PipelineAggregatorBuilder<MovAvgBuilder> {
     private MovAvgModelBuilder modelBuilder;
     private Integer window;
     private Integer predict;
+    private Boolean minimize;
+    private Map<String, Object> settings;
 
     public MovAvgBuilder(String name) {
         super(name, MovAvgPipelineAggregator.TYPE.name());
@@ -94,6 +97,30 @@ public class MovAvgBuilder extends PipelineAggregatorBuilder<MovAvgBuilder> {
         return this;
     }
 
+    /**
+     * Determines if the model should be fit to the data using a cost
+     * minimizing algorithm.
+     *
+     * @param minimize If the model should be fit to the underlying data
+     * @return Returns the builder to continue chaining
+     */
+    public MovAvgBuilder minimize(boolean minimize) {
+        this.minimize = minimize;
+        return this;
+    }
+
+    /**
+     * The hash of settings that should be provided to the model when it is
+     * instantiated
+     *
+     * @param settings
+     * @return
+     */
+    public MovAvgBuilder settings(Map<String, Object> settings) {
+        this.settings = settings;
+        return this;
+    }
+
 
     @Override
     protected XContentBuilder internalXContent(XContentBuilder builder, Params params) throws IOException {
@@ -111,6 +138,12 @@ public class MovAvgBuilder extends PipelineAggregatorBuilder<MovAvgBuilder> {
         }
         if (predict != null) {
             builder.field(MovAvgParser.PREDICT.getPreferredName(), predict);
+        }
+        if (minimize != null) {
+            builder.field(MovAvgParser.MINIMIZE.getPreferredName(), minimize);
+        }
+        if (settings != null) {
+            builder.field(MovAvgParser.SETTINGS.getPreferredName(), settings);
         }
         return builder;
     }

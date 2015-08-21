@@ -32,10 +32,9 @@ import org.elasticsearch.index.mapper.Mapper;
 import org.elasticsearch.index.mapper.MapperParsingException;
 import org.elasticsearch.index.mapper.MergeMappingException;
 import org.elasticsearch.index.mapper.MergeResult;
+import org.elasticsearch.index.mapper.MetadataFieldMapper;
 import org.elasticsearch.index.mapper.ParseContext;
 import org.elasticsearch.index.mapper.ParseContext.Document;
-import org.elasticsearch.index.mapper.RootMapper;
-import org.elasticsearch.index.mapper.core.AbstractFieldMapper;
 
 import java.io.IOException;
 import java.util.Iterator;
@@ -43,7 +42,7 @@ import java.util.List;
 import java.util.Map;
 
 /** Mapper for the _version field. */
-public class VersionFieldMapper extends AbstractFieldMapper implements RootMapper {
+public class VersionFieldMapper extends MetadataFieldMapper {
 
     public static final String NAME = "_version";
     public static final String CONTENT_TYPE = "_version";
@@ -56,14 +55,15 @@ public class VersionFieldMapper extends AbstractFieldMapper implements RootMappe
         static {
             FIELD_TYPE.setNames(new MappedFieldType.Names(NAME));
             FIELD_TYPE.setDocValuesType(DocValuesType.NUMERIC);
+            FIELD_TYPE.setHasDocValues(true);
             FIELD_TYPE.freeze();
         }
     }
 
-    public static class Builder extends Mapper.Builder<Builder, VersionFieldMapper> {
+    public static class Builder extends MetadataFieldMapper.Builder<Builder, VersionFieldMapper> {
 
         public Builder() {
-            super(Defaults.NAME);
+            super(Defaults.NAME, Defaults.FIELD_TYPE);
         }
 
         @Override
@@ -79,7 +79,7 @@ public class VersionFieldMapper extends AbstractFieldMapper implements RootMappe
             for (Iterator<Map.Entry<String, Object>> iterator = node.entrySet().iterator(); iterator.hasNext();) {
                 Map.Entry<String, Object> entry = iterator.next();
                 String fieldName = Strings.toUnderscoreCase(entry.getKey());
-                if (fieldName.equals(DOC_VALUES_FORMAT) && parserContext.indexVersionCreated().before(Version.V_2_0_0)) {
+                if (fieldName.equals("doc_values_format") && parserContext.indexVersionCreated().before(Version.V_2_0_0_beta1)) {
                     // ignore in 1.x, reject in 2.x
                     iterator.remove();
                 }
@@ -90,7 +90,9 @@ public class VersionFieldMapper extends AbstractFieldMapper implements RootMappe
 
     static final class VersionFieldType extends MappedFieldType {
 
-        public VersionFieldType() {}
+        public VersionFieldType() {
+            setFieldDataType(new FieldDataType("long"));
+        }
 
         protected VersionFieldType(VersionFieldType ref) {
             super(ref);
@@ -117,7 +119,7 @@ public class VersionFieldMapper extends AbstractFieldMapper implements RootMappe
     }
 
     public VersionFieldMapper(Settings indexSettings) {
-        super(Defaults.FIELD_TYPE, true, null, indexSettings);
+        super(NAME, Defaults.FIELD_TYPE, Defaults.FIELD_TYPE, indexSettings);
     }
 
     @Override
@@ -147,16 +149,6 @@ public class VersionFieldMapper extends AbstractFieldMapper implements RootMappe
             final Document doc = context.docs().get(i);
             doc.add(new NumericDocValuesField(NAME, 1L));
         }
-    }
-
-    @Override
-    public MappedFieldType defaultFieldType() {
-        return Defaults.FIELD_TYPE;
-    }
-
-    @Override
-    public FieldDataType defaultFieldDataType() {
-        return new FieldDataType("long");
     }
 
     @Override

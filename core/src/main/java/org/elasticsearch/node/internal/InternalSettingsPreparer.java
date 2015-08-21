@@ -19,20 +19,28 @@
 
 package org.elasticsearch.node.internal;
 
+import com.google.common.base.Charsets;
 import com.google.common.collect.ImmutableList;
 import com.google.common.collect.UnmodifiableIterator;
 import org.elasticsearch.cluster.ClusterName;
 import org.elasticsearch.common.Booleans;
-import org.elasticsearch.common.Names;
 import org.elasticsearch.common.Strings;
 import org.elasticsearch.common.cli.Terminal;
 import org.elasticsearch.common.collect.Tuple;
 import org.elasticsearch.common.settings.Settings;
+import org.elasticsearch.common.settings.SettingsException;
 import org.elasticsearch.env.Environment;
-import org.elasticsearch.env.FailedToResolveConfigException;
 
+import java.io.BufferedReader;
+import java.io.IOException;
+import java.io.InputStream;
+import java.io.InputStreamReader;
+import java.nio.file.Files;
+import java.nio.file.Path;
+import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
+import java.util.concurrent.ThreadLocalRandom;
 
 import static org.elasticsearch.common.Strings.cleanPath;
 import static org.elasticsearch.common.settings.Settings.settingsBuilder;
@@ -50,8 +58,8 @@ public class InternalSettingsPreparer {
 
     /**
      * Prepares the settings by gathering all elasticsearch system properties, optionally loading the configuration settings,
-     * and then replacing all property placeholders. This method will not work with settings that have <code>__prompt__</code>
-     * as their value unless they have been resolved previously.
+     * and then replacing all property placeholders. This method will not work with settings that have <code>${prompt.text}</code>
+     * or <code>${prompt.secret}</code> as their value unless they have been resolved previously.
      * @param pSettings The initial settings to use
      * @param loadConfigSettings flag to indicate whether to load settings from the configuration directory/file
      * @return the {@link Settings} and {@link Environment} as a {@link Tuple}
@@ -63,7 +71,8 @@ public class InternalSettingsPreparer {
     /**
      * Prepares the settings by gathering all elasticsearch system properties, optionally loading the configuration settings,
      * and then replacing all property placeholders. If a {@link Terminal} is provided and configuration settings are loaded,
-     * settings with the <code>__prompt__</code> value will result in a prompt for the setting to the user.
+     * settings with a value of <code>${prompt.text}</code> or <code>${prompt.secret}</code> will result in a prompt for
+     * the setting to the user.
      * @param pSettings The initial settings to use
      * @param loadConfigSettings flag to indicate whether to load settings from the configuration directory/file
      * @param terminal the Terminal to use for input/output
@@ -91,23 +100,23 @@ public class InternalSettingsPreparer {
                 // if its default, then load it, but also load form env
                 if (Strings.hasText(System.getProperty("es.default.config"))) {
                     loadFromEnv = true;
-                    settingsBuilder.loadFromUrl(environment.resolveConfig(System.getProperty("es.default.config")));
+                    settingsBuilder.loadFromPath(environment.configFile().resolve(System.getProperty("es.default.config")));
                 }
                 // if explicit, just load it and don't load from env
                 if (Strings.hasText(System.getProperty("es.config"))) {
                     loadFromEnv = false;
-                    settingsBuilder.loadFromUrl(environment.resolveConfig(System.getProperty("es.config")));
+                    settingsBuilder.loadFromPath(environment.configFile().resolve(System.getProperty("es.config")));
                 }
                 if (Strings.hasText(System.getProperty("elasticsearch.config"))) {
                     loadFromEnv = false;
-                    settingsBuilder.loadFromUrl(environment.resolveConfig(System.getProperty("elasticsearch.config")));
+                    settingsBuilder.loadFromPath(environment.configFile().resolve(System.getProperty("elasticsearch.config")));
                 }
             }
             if (loadFromEnv) {
                 for (String allowedSuffix : ALLOWED_SUFFIXES) {
                     try {
-                        settingsBuilder.loadFromUrl(environment.resolveConfig("elasticsearch" + allowedSuffix));
-                    } catch (FailedToResolveConfigException e) {
+                        settingsBuilder.loadFromPath(environment.configFile().resolve("elasticsearch" + allowedSuffix));
+                    } catch (SettingsException e) {
                         // ignore
                     }
                 }
@@ -131,16 +140,9 @@ public class InternalSettingsPreparer {
         }
         settingsBuilder.replacePropertyPlaceholders();
 
-        // generate the name
+        // check if name is set in settings, if not look for system property and set it
         if (settingsBuilder.get("name") == null) {
             String name = System.getProperty("name");
-            if (name == null || name.isEmpty()) {
-                name = settingsBuilder.get("node.name");
-                if (name == null || name.isEmpty()) {
-                    name = Names.randomNodeName(environment.resolveConfig("names.txt"));
-                }
-            }
-
             if (name != null) {
                 settingsBuilder.put("name", name);
             }
@@ -155,17 +157,57 @@ public class InternalSettingsPreparer {
         if (v != null) {
             Settings.setSettingsRequireUnits(Booleans.parseBoolean(v, true));
         }
-        Settings v1 = replacePromptPlaceholders(settingsBuilder.build(), terminal);
-        environment = new Environment(v1);
+
+        Settings settings = replacePromptPlaceholders(settingsBuilder.build(), terminal);
+        // all settings placeholders have been resolved. resolve the value for the name setting by checking for name,
+        // then looking for node.name, and finally generate one if needed
+        if (settings.get("name") == null) {
+            String name = settings.get("node.name");
+            if (name == null || name.isEmpty()) {
+                name = randomNodeName(environment);
+            }
+            settings = settingsBuilder().put(settings).put("name", name).build();
+        }
+
+        environment = new Environment(settings);
 
         // put back the env settings
-        settingsBuilder = settingsBuilder().put(v1);
+        settingsBuilder = settingsBuilder().put(settings);
         // we put back the path.logs so we can use it in the logging configuration file
         settingsBuilder.put("path.logs", cleanPath(environment.logsFile().toAbsolutePath().toString()));
 
-        v1 = settingsBuilder.build();
+        settings = settingsBuilder.build();
 
-        return new Tuple<>(v1, environment);
+        return new Tuple<>(settings, environment);
+    }
+
+    static String randomNodeName(Environment environment) {
+        InputStream input;
+        Path namesPath = environment.configFile().resolve("names.txt");
+        if (Files.exists(namesPath)) {
+            try {
+                input = Files.newInputStream(namesPath);
+            } catch (IOException e) {
+                throw new RuntimeException("Failed to load custom names.txt from " + namesPath, e);
+            }
+        } else {
+            input = InternalSettingsPreparer.class.getResourceAsStream("/config/names.txt");
+        }
+
+        try {
+            List<String> names = new ArrayList<>();
+            try (BufferedReader reader = new BufferedReader(new InputStreamReader(input, Charsets.UTF_8))) {
+                String name = reader.readLine();
+                while (name != null) {
+                    names.add(name);
+                    name = reader.readLine();
+                }
+            }
+            int index = ThreadLocalRandom.current().nextInt(names.size());
+            return names.get(index);
+        } catch (IOException e) {
+            throw new RuntimeException("Could not read node names list", e);
+        }
     }
 
     static Settings replacePromptPlaceholders(Settings settings, Terminal terminal) {

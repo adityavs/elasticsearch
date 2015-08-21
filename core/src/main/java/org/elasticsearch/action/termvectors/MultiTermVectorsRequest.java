@@ -32,7 +32,7 @@ import org.elasticsearch.common.xcontent.XContentParser;
 import java.io.IOException;
 import java.util.*;
 
-public class MultiTermVectorsRequest extends ActionRequest<MultiTermVectorsRequest> implements Iterable<TermVectorsRequest>, CompositeIndicesRequest {
+public class MultiTermVectorsRequest extends ActionRequest<MultiTermVectorsRequest> implements Iterable<TermVectorsRequest>, CompositeIndicesRequest, RealtimeRequest {
 
     String preference;
     List<TermVectorsRequest> requests = new ArrayList<>();
@@ -111,18 +111,16 @@ public class MultiTermVectorsRequest extends ActionRequest<MultiTermVectorsReque
                                 ids.add(parser.text());
                             }
                         } else {
-                            throw new ElasticsearchParseException(
-                                    "No parameter named " + currentFieldName + "and type ARRAY");
+                            throw new ElasticsearchParseException("no parameter named [{}] and type ARRAY", currentFieldName);
                         }
                     } else if (token == XContentParser.Token.START_OBJECT && currentFieldName != null) {
                         if ("parameters".equals(currentFieldName)) {
                             TermVectorsRequest.parseRequest(template, parser);
                         } else {
-                            throw new ElasticsearchParseException(
-                                    "No parameter named " + currentFieldName + "and type OBJECT");
+                            throw new ElasticsearchParseException("no parameter named [{}] and type OBJECT", currentFieldName);
                         }
                     } else if (currentFieldName != null) {
-                        throw new ElasticsearchParseException("_mtermvectors: Parameter " + currentFieldName + "not supported");
+                        throw new ElasticsearchParseException("_mtermvectors: Parameter [{}] not supported", currentFieldName);
                     }
                 }
             }
@@ -163,5 +161,13 @@ public class MultiTermVectorsRequest extends ActionRequest<MultiTermVectorsReque
 
     public int size() {
         return requests.size();
+    }
+
+    @Override
+    public MultiTermVectorsRequest realtime(Boolean realtime) {
+        for (TermVectorsRequest request : requests) {
+            request.realtime(realtime);
+        }
+        return this;
     }
 }

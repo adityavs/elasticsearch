@@ -23,11 +23,9 @@ import com.carrotsearch.hppc.ObjectHashSet;
 import com.carrotsearch.hppc.ObjectSet;
 import com.carrotsearch.hppc.cursors.ObjectCursor;
 import com.google.common.collect.ImmutableMap;
-
 import org.apache.lucene.index.IndexOptions;
 import org.apache.lucene.index.LeafReaderContext;
 import org.apache.lucene.index.NumericDocValues;
-import org.apache.lucene.search.QueryCachingPolicy;
 import org.apache.lucene.search.TopDocs;
 import org.elasticsearch.ElasticsearchException;
 import org.elasticsearch.ElasticsearchParseException;
@@ -37,6 +35,7 @@ import org.elasticsearch.cache.recycler.PageCacheRecycler;
 import org.elasticsearch.cluster.ClusterService;
 import org.elasticsearch.cluster.metadata.IndexMetaData;
 import org.elasticsearch.common.Nullable;
+import org.elasticsearch.common.ParseFieldMatcher;
 import org.elasticsearch.common.bytes.BytesReference;
 import org.elasticsearch.common.component.AbstractLifecycleComponent;
 import org.elasticsearch.common.inject.Inject;
@@ -50,10 +49,10 @@ import org.elasticsearch.common.util.concurrent.ConcurrentMapLong;
 import org.elasticsearch.common.util.concurrent.FutureUtils;
 import org.elasticsearch.common.xcontent.XContentFactory;
 import org.elasticsearch.common.xcontent.XContentHelper;
+import org.elasticsearch.common.xcontent.XContentLocation;
 import org.elasticsearch.common.xcontent.XContentParser;
 import org.elasticsearch.index.Index;
 import org.elasticsearch.index.IndexService;
-import org.elasticsearch.index.cache.IndexCache;
 import org.elasticsearch.index.engine.Engine;
 import org.elasticsearch.index.fielddata.FieldDataType;
 import org.elasticsearch.index.fielddata.IndexFieldData;
@@ -74,32 +73,19 @@ import org.elasticsearch.indices.IndicesWarmer;
 import org.elasticsearch.indices.IndicesWarmer.TerminationHandle;
 import org.elasticsearch.indices.IndicesWarmer.WarmerContext;
 import org.elasticsearch.indices.cache.request.IndicesRequestCache;
+import org.elasticsearch.node.settings.NodeSettingsService;
 import org.elasticsearch.script.ExecutableScript;
 import org.elasticsearch.script.Script.ScriptParseException;
 import org.elasticsearch.script.ScriptContext;
 import org.elasticsearch.script.ScriptService;
 import org.elasticsearch.script.Template;
 import org.elasticsearch.script.mustache.MustacheScriptEngineService;
-import org.elasticsearch.search.dfs.CachedDfSource;
 import org.elasticsearch.search.dfs.DfsPhase;
 import org.elasticsearch.search.dfs.DfsSearchResult;
-import org.elasticsearch.search.fetch.FetchPhase;
-import org.elasticsearch.search.fetch.FetchSearchResult;
-import org.elasticsearch.search.fetch.QueryFetchSearchResult;
-import org.elasticsearch.search.fetch.ScrollQueryFetchSearchResult;
-import org.elasticsearch.search.fetch.ShardFetchRequest;
-import org.elasticsearch.search.internal.DefaultSearchContext;
-import org.elasticsearch.search.internal.InternalScrollSearchRequest;
-import org.elasticsearch.search.internal.SearchContext;
+import org.elasticsearch.search.fetch.*;
+import org.elasticsearch.search.internal.*;
 import org.elasticsearch.search.internal.SearchContext.Lifetime;
-import org.elasticsearch.search.internal.ShardSearchLocalRequest;
-import org.elasticsearch.search.internal.ShardSearchRequest;
-import org.elasticsearch.search.query.QueryPhase;
-import org.elasticsearch.search.query.QueryPhaseExecutionException;
-import org.elasticsearch.search.query.QuerySearchRequest;
-import org.elasticsearch.search.query.QuerySearchResult;
-import org.elasticsearch.search.query.QuerySearchResultProvider;
-import org.elasticsearch.search.query.ScrollQuerySearchResult;
+import org.elasticsearch.search.query.*;
 import org.elasticsearch.search.warmer.IndexWarmersMetaData;
 import org.elasticsearch.threadpool.ThreadPool;
 
@@ -113,6 +99,7 @@ import java.util.concurrent.ScheduledFuture;
 import java.util.concurrent.atomic.AtomicLong;
 
 import static org.elasticsearch.common.Strings.hasLength;
+import static org.elasticsearch.common.unit.TimeValue.timeValueMillis;
 import static org.elasticsearch.common.unit.TimeValue.timeValueMinutes;
 
 /**
@@ -123,7 +110,9 @@ public class SearchService extends AbstractLifecycleComponent<SearchService> {
     public static final String NORMS_LOADING_KEY = "index.norms.loading";
     public static final String DEFAULT_KEEPALIVE_KEY = "search.default_keep_alive";
     public static final String KEEPALIVE_INTERVAL_KEY = "search.keep_alive_interval";
+    public static final String DEFAULT_SEARCH_TIMEOUT = "search.default_search_timeout";
 
+    public static final TimeValue NO_TIMEOUT = timeValueMillis(-1);
 
     private final ThreadPool threadPool;
 
@@ -149,6 +138,8 @@ public class SearchService extends AbstractLifecycleComponent<SearchService> {
 
     private final long defaultKeepAlive;
 
+    private volatile TimeValue defaultSearchTimeout;
+
     private final ScheduledFuture<?> keepAliveReaper;
 
     private final AtomicLong idGenerator = new AtomicLong();
@@ -157,20 +148,35 @@ public class SearchService extends AbstractLifecycleComponent<SearchService> {
 
     private final ImmutableMap<String, SearchParseElement> elementParsers;
 
+    private final ParseFieldMatcher parseFieldMatcher;
+
     @Inject
-    public SearchService(Settings settings, ClusterService clusterService, IndicesService indicesService,IndicesWarmer indicesWarmer, ThreadPool threadPool,
+    public SearchService(Settings settings, NodeSettingsService nodeSettingsService, ClusterService clusterService, IndicesService indicesService,IndicesWarmer indicesWarmer, ThreadPool threadPool,
                          ScriptService scriptService, PageCacheRecycler pageCacheRecycler, BigArrays bigArrays, DfsPhase dfsPhase, QueryPhase queryPhase, FetchPhase fetchPhase,
                          IndicesRequestCache indicesQueryCache) {
         super(settings);
+        this.parseFieldMatcher = new ParseFieldMatcher(settings);
         this.threadPool = threadPool;
         this.clusterService = clusterService;
         this.indicesService = indicesService;
         indicesService.indicesLifecycle().addListener(new IndicesLifecycle.Listener() {
+            @Override
+            public void afterIndexClosed(Index index, @IndexSettings Settings indexSettings) {
+                // once an index is closed we can just clean up all the pending search context information
+                // to release memory and let references to the filesystem go etc.
+                IndexMetaData idxMeta = SearchService.this.clusterService.state().metaData().index(index.getName());
+                if (idxMeta != null && idxMeta.state() == IndexMetaData.State.CLOSE) {
+                    // we need to check if it's really closed
+                    // since sometimes due to a relocation we already closed the shard and that causes the index to be closed
+                    // if we then close all the contexts we can get some search failures along the way which are not expected.
+                    // it's fine to keep the contexts open if the index is still "alive"
+                    // unfortunately we don't have a clear way to signal today why an index is closed.
+                    afterIndexDeleted(index, indexSettings);
+                }
+            }
 
             @Override
             public void afterIndexDeleted(Index index, @IndexSettings Settings indexSettings) {
-                // once an index is closed we can just clean up all the pending search context information
-                // to release memory and let references to the filesystem go etc.
                 freeAllContextForIndex(index);
             }
         });
@@ -199,6 +205,20 @@ public class SearchService extends AbstractLifecycleComponent<SearchService> {
         this.indicesWarmer.addListener(new NormsWarmer());
         this.indicesWarmer.addListener(new FieldDataWarmer());
         this.indicesWarmer.addListener(new SearchWarmer());
+
+        defaultSearchTimeout = settings.getAsTime(DEFAULT_SEARCH_TIMEOUT, NO_TIMEOUT);
+        nodeSettingsService.addListener(new SearchSettingsListener());
+    }
+
+    class SearchSettingsListener implements NodeSettingsService.Listener {
+        @Override
+        public void onRefreshSettings(Settings settings) {
+            final TimeValue maybeNewDefaultSearchTimeout = settings.getAsTime(SearchService.DEFAULT_SEARCH_TIMEOUT, SearchService.this.defaultSearchTimeout);
+            if (!maybeNewDefaultSearchTimeout.equals(SearchService.this.defaultSearchTimeout)) {
+                logger.info("updating [{}] from [{}] to [{}]", SearchService.DEFAULT_SEARCH_TIMEOUT, SearchService.this.defaultSearchTimeout, maybeNewDefaultSearchTimeout);
+                SearchService.this.defaultSearchTimeout = maybeNewDefaultSearchTimeout;
+            }
+        }
     }
 
     protected void putContext(SearchContext context) {
@@ -243,6 +263,7 @@ public class SearchService extends AbstractLifecycleComponent<SearchService> {
         }
     }
 
+    @Deprecated // remove in 3.0
     public QuerySearchResult executeScan(ShardSearchRequest request) {
         final SearchContext context = createAndPutContext(request);
         final int originalSize = context.size();
@@ -251,7 +272,7 @@ public class SearchService extends AbstractLifecycleComponent<SearchService> {
                 throw new IllegalArgumentException("aggregations are not supported with search_type=scan");
             }
 
-            if (context.scroll() == null) {
+            if (context.scrollContext() == null || context.scrollContext().scroll == null) {
                 throw new ElasticsearchException("Scroll must be provided when scanning...");
             }
 
@@ -276,22 +297,39 @@ public class SearchService extends AbstractLifecycleComponent<SearchService> {
 
     public ScrollQueryFetchSearchResult executeScan(InternalScrollSearchRequest request) {
         final SearchContext context = findContext(request.id());
+        ShardSearchStats shardSearchStats = context.indexShard().searchService();
         contextProcessing(context);
         try {
             processScroll(request, context);
-            if (context.searchType() == SearchType.QUERY_THEN_FETCH) {
-                // first scanning, reset the from to 0
-                context.searchType(SearchType.SCAN);
-                context.from(0);
+            shardSearchStats.onPreQueryPhase(context);
+            long time = System.nanoTime();
+            try {
+                if (context.searchType() == SearchType.QUERY_THEN_FETCH) {
+                    // first scanning, reset the from to 0
+                    context.searchType(SearchType.SCAN);
+                    context.from(0);
+                }
+                queryPhase.execute(context);
+            } catch (Throwable e) {
+                shardSearchStats.onFailedQueryPhase(context);
+                throw ExceptionsHelper.convertToRuntime(e);
             }
-            queryPhase.execute(context);
-            shortcutDocIdsToLoadForScanning(context);
-            fetchPhase.execute(context);
-            if (context.scroll() == null || context.fetchResult().hits().hits().length < context.size()) {
-                freeContext(request.id());
-            } else {
-                contextProcessedSuccessfully(context);
+            long queryFinishTime = System.nanoTime();
+            shardSearchStats.onQueryPhase(context, queryFinishTime - time);
+            shardSearchStats.onPreFetchPhase(context);
+            try {
+                shortcutDocIdsToLoadForScanning(context);
+                fetchPhase.execute(context);
+                if (context.scrollContext() == null || context.fetchResult().hits().hits().length < context.size()) {
+                    freeContext(request.id());
+                } else {
+                    contextProcessedSuccessfully(context);
+                }
+            } catch (Throwable e) {
+                shardSearchStats.onFailedFetchPhase(context);
+                throw ExceptionsHelper.convertToRuntime(e);
             }
+            shardSearchStats.onFetchPhase(context, System.nanoTime() - queryFinishTime);
             return new ScrollQueryFetchSearchResult(new QueryFetchSearchResult(context.queryResult(), context.fetchResult()), context.shardTarget());
         } catch (Throwable e) {
             logger.trace("Scan phase failed", e);
@@ -325,7 +363,7 @@ public class SearchService extends AbstractLifecycleComponent<SearchService> {
 
             loadOrExecuteQueryPhase(request, context, queryPhase);
 
-            if (context.queryResult().topDocs().scoreDocs.length == 0 && context.scroll() == null) {
+            if (context.queryResult().topDocs().scoreDocs.length == 0 && context.scrollContext() == null) {
                 freeContext(context.id());
             } else {
                 contextProcessedSuccessfully(context);
@@ -372,23 +410,14 @@ public class SearchService extends AbstractLifecycleComponent<SearchService> {
     public QuerySearchResult executeQueryPhase(QuerySearchRequest request) {
         final SearchContext context = findContext(request.id());
         contextProcessing(context);
+        context.searcher().setAggregatedDfs(request.dfs());
         IndexShard indexShard = context.indexShard();
-        try {
-            final IndexCache indexCache = indexShard.indexService().cache();
-            final QueryCachingPolicy cachingPolicy = indexShard.getQueryCachingPolicy();
-            context.searcher().dfSource(new CachedDfSource(context.searcher().getIndexReader(), request.dfs(), context.similarityService().similarity(),
-                    indexCache.query(), cachingPolicy));
-        } catch (Throwable e) {
-            processFailure(context, e);
-            cleanContext(context);
-            throw new QueryPhaseExecutionException(context, "Failed to set aggregated df", e);
-        }
         ShardSearchStats shardSearchStats = indexShard.searchService();
         try {
             shardSearchStats.onPreQueryPhase(context);
             long time = System.nanoTime();
             queryPhase.execute(context);
-            if (context.queryResult().topDocs().scoreDocs.length == 0 && context.scroll() == null) {
+            if (context.queryResult().topDocs().scoreDocs.length == 0 && context.scrollContext() == null) {
                 // no hits, we can release the context since there will be no fetch phase
                 freeContext(context.id());
             } else {
@@ -403,6 +432,16 @@ public class SearchService extends AbstractLifecycleComponent<SearchService> {
             throw ExceptionsHelper.convertToRuntime(e);
         } finally {
             cleanContext(context);
+        }
+    }
+
+    private boolean fetchPhaseShouldFreeContext(SearchContext context) {
+        if (context.scrollContext() == null) {
+            // simple search, no scroll
+            return true;
+        } else {
+            // scroll request, but the scroll was not extended
+            return context.scrollContext().scroll == null;
         }
     }
 
@@ -425,7 +464,7 @@ public class SearchService extends AbstractLifecycleComponent<SearchService> {
             try {
                 shortcutDocIdsToLoad(context);
                 fetchPhase.execute(context);
-                if (context.scroll() == null) {
+                if (fetchPhaseShouldFreeContext(context)) {
                     freeContext(context.id());
                 } else {
                     contextProcessedSuccessfully(context);
@@ -448,17 +487,7 @@ public class SearchService extends AbstractLifecycleComponent<SearchService> {
     public QueryFetchSearchResult executeFetchPhase(QuerySearchRequest request) {
         final SearchContext context = findContext(request.id());
         contextProcessing(context);
-        try {
-            final IndexShard indexShard = context.indexShard();
-            final IndexCache indexCache = indexShard.indexService().cache();
-            final QueryCachingPolicy cachingPolicy = indexShard.getQueryCachingPolicy();
-            context.searcher().dfSource(new CachedDfSource(context.searcher().getIndexReader(), request.dfs(), context.similarityService().similarity(),
-                    indexCache.query(), cachingPolicy));
-        } catch (Throwable e) {
-            freeContext(context.id());
-            cleanContext(context);
-            throw new QueryPhaseExecutionException(context, "Failed to set aggregated df", e);
-        }
+        context.searcher().setAggregatedDfs(request.dfs());
         try {
             ShardSearchStats shardSearchStats = context.indexShard().searchService();
             shardSearchStats.onPreQueryPhase(context);
@@ -475,7 +504,7 @@ public class SearchService extends AbstractLifecycleComponent<SearchService> {
             try {
                 shortcutDocIdsToLoad(context);
                 fetchPhase.execute(context);
-                if (context.scroll() == null) {
+                if (fetchPhaseShouldFreeContext(context)) {
                     freeContext(request.id());
                 } else {
                     contextProcessedSuccessfully(context);
@@ -515,7 +544,7 @@ public class SearchService extends AbstractLifecycleComponent<SearchService> {
             try {
                 shortcutDocIdsToLoad(context);
                 fetchPhase.execute(context);
-                if (context.scroll() == null) {
+                if (fetchPhaseShouldFreeContext(context)) {
                     freeContext(request.id());
                 } else {
                     contextProcessedSuccessfully(context);
@@ -541,13 +570,13 @@ public class SearchService extends AbstractLifecycleComponent<SearchService> {
         final ShardSearchStats shardSearchStats = context.indexShard().searchService();
         try {
             if (request.lastEmittedDoc() != null) {
-                context.lastEmittedDoc(request.lastEmittedDoc());
+                context.scrollContext().lastEmittedDoc = request.lastEmittedDoc();
             }
             context.docIdsToLoad(request.docIds(), 0, request.docIdsSize());
             shardSearchStats.onPreFetchPhase(context);
             long time = System.nanoTime();
             fetchPhase.execute(context);
-            if (context.scroll() == null) {
+            if (fetchPhaseShouldFreeContext(context)) {
                 freeContext(request.id());
             } else {
                 contextProcessedSuccessfully(context);
@@ -578,6 +607,9 @@ public class SearchService extends AbstractLifecycleComponent<SearchService> {
         boolean success = false;
         try {
             putContext(context);
+            if (request.scroll() != null) {
+                context.indexShard().searchService().onNewScrollContext(context);
+            }
             context.indexShard().searchService().onNewContext(context);
             success = true;
             return context;
@@ -595,12 +627,16 @@ public class SearchService extends AbstractLifecycleComponent<SearchService> {
         SearchShardTarget shardTarget = new SearchShardTarget(clusterService.localNode().id(), request.index(), request.shardId());
 
         Engine.Searcher engineSearcher = searcher == null ? indexShard.acquireSearcher("search") : searcher;
-        SearchContext context = new DefaultSearchContext(idGenerator.incrementAndGet(), request, shardTarget, engineSearcher, indexService, indexShard, scriptService, pageCacheRecycler, bigArrays, threadPool.estimatedTimeInMillisCounter());
+
+        SearchContext context = new DefaultSearchContext(idGenerator.incrementAndGet(), request, shardTarget, engineSearcher, indexService, indexShard, scriptService, pageCacheRecycler, bigArrays, threadPool.estimatedTimeInMillisCounter(), parseFieldMatcher, defaultSearchTimeout);
         SearchContext.setCurrent(context);
         try {
-            context.scroll(request.scroll());
+            if (request.scroll() != null) {
+                context.scrollContext(new ScrollContext());
+                context.scrollContext().scroll = request.scroll();
+            }
 
-            parseTemplate(request);
+            parseTemplate(request, context);
             parseSource(context, request.source());
             parseSource(context, request.extraSource());
 
@@ -651,6 +687,9 @@ public class SearchService extends AbstractLifecycleComponent<SearchService> {
         if (context != null) {
             try {
                 context.indexShard().searchService().onFreeContext(context);
+                if (context.scrollContext() != null) {
+                    context.indexShard().searchService().onFreeScrollContext(context);
+                }
             } finally {
                 context.close();
             }
@@ -661,7 +700,7 @@ public class SearchService extends AbstractLifecycleComponent<SearchService> {
 
     public void freeAllScrollContexts() {
         for (SearchContext searchContext : activeContexts.values()) {
-            if (searchContext.scroll() != null) {
+            if (searchContext.scrollContext() != null) {
                 freeContext(searchContext.id());
             }
         }
@@ -693,7 +732,7 @@ public class SearchService extends AbstractLifecycleComponent<SearchService> {
         }
     }
 
-    private void parseTemplate(ShardSearchRequest request) {
+    private void parseTemplate(ShardSearchRequest request, SearchContext searchContext) {
 
         BytesReference processedQuery;
         if (request.template() != null) {
@@ -708,7 +747,7 @@ public class SearchService extends AbstractLifecycleComponent<SearchService> {
 
             try {
                 parser = XContentFactory.xContent(request.templateSource()).createParser(request.templateSource());
-                template = TemplateQueryParser.parse(parser, "params", "template");
+                template = TemplateQueryParser.parse(parser, searchContext.parseFieldMatcher(), "params", "template");
 
                 if (template.getType() == ScriptService.ScriptType.INLINE) {
                     //Try to double parse for nested template id/file
@@ -727,7 +766,7 @@ public class SearchService extends AbstractLifecycleComponent<SearchService> {
                     }
                     if (parser != null) {
                         try {
-                            Template innerTemplate = TemplateQueryParser.parse(parser);
+                            Template innerTemplate = TemplateQueryParser.parse(parser, searchContext.parseFieldMatcher());
                             if (hasLength(innerTemplate.getScript()) && !innerTemplate.getType().equals(ScriptService.ScriptType.INLINE)) {
                                 //An inner template referring to a filename or id
                                 template = new Template(innerTemplate.getScript(), innerTemplate.getType(),
@@ -767,7 +806,7 @@ public class SearchService extends AbstractLifecycleComponent<SearchService> {
             XContentParser.Token token;
             token = parser.nextToken();
             if (token != XContentParser.Token.START_OBJECT) {
-                throw new ElasticsearchParseException("Expected START_OBJECT but got " + token.name() + " " + parser.currentName());
+                throw new ElasticsearchParseException("failed to parse search source. source must be an object, but found [{}] instead", token.name());
             }
             while ((token = parser.nextToken()) != XContentParser.Token.END_OBJECT) {
                 if (token == XContentParser.Token.FIELD_NAME) {
@@ -775,14 +814,14 @@ public class SearchService extends AbstractLifecycleComponent<SearchService> {
                     parser.nextToken();
                     SearchParseElement element = elementParsers.get(fieldName);
                     if (element == null) {
-                        throw new SearchParseException(context, "No parser for element [" + fieldName + "]", parser.getTokenLocation());
+                        throw new SearchParseException(context, "failed to parse search source. unknown search element [" + fieldName + "]", parser.getTokenLocation());
                     }
                     element.parse(parser, context);
                 } else {
                     if (token == null) {
-                        throw new ElasticsearchParseException("End of query source reached but query is not complete.");
+                        throw new ElasticsearchParseException("failed to parse search source. end of query source reached but query is not complete.");
                     } else {
-                        throw new ElasticsearchParseException("Expected field name but got " + token.name() + " \"" + parser.currentName() + "\"");
+                        throw new ElasticsearchParseException("failed to parse search source. expected field name but got [{}]", token);
                     }
                 }
             }
@@ -793,7 +832,8 @@ public class SearchService extends AbstractLifecycleComponent<SearchService> {
             } catch (Throwable e1) {
                 // ignore
             }
-            throw new SearchParseException(context, "Failed to parse source [" + sSource + "]", parser.getTokenLocation(), e);
+            XContentLocation location = parser != null ? parser.getTokenLocation() : null;
+            throw new SearchParseException(context, "failed to parse search source [" + sSource + "]", location, e);
         } finally {
             if (parser != null) {
                 parser.close();
@@ -854,7 +894,7 @@ public class SearchService extends AbstractLifecycleComponent<SearchService> {
     private void processScroll(InternalScrollSearchRequest request, SearchContext context) {
         // process scroll
         context.from(context.from() + context.size());
-        context.scroll(request.scroll());
+        context.scrollContext().scroll = request.scroll();
         // update the context keep alive based on the new scroll value
         if (request.scroll() != null && request.scroll().keepAlive() != null) {
             context.keepAlive(request.scroll().keepAlive().millis());
