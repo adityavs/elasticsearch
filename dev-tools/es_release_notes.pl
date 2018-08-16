@@ -18,7 +18,7 @@
 use strict;
 use warnings;
 
-use HTTP::Tiny;
+use HTTP::Tiny 0.070;
 use IO::Socket::SSL 1.52;
 use utf8;
 
@@ -27,21 +27,29 @@ my $Base_URL   = "https://${Github_Key}api.github.com/repos/";
 my $User_Repo  = 'elastic/elasticsearch/';
 my $Issue_URL  = "http://github.com/${User_Repo}issues/";
 
-my @Groups = qw(
-    breaking deprecation feature
-    enhancement bug regression build doc test
+my @Groups = (
+    ">breaking",    ">breaking-java", ">deprecation", ">feature",
+    ">enhancement", ">bug",           ">regression",  ">upgrade"
 );
+my %Ignore = map { $_ => 1 }
+    ( ">non-issue", ">refactoring", ">docs", ">test", ">test-failure", ":Core/Build" );
+
 my %Group_Labels = (
-    breaking    => 'Breaking changes',
-    build       => 'Build',
-    deprecation => 'Deprecations',
-    doc         => 'Docs',
-    feature     => 'New features',
-    enhancement => 'Enhancements',
-    bug         => 'Bug fixes',
-    regression  => 'Regression',
-    test        => 'Tests',
-    other       => 'NOT CLASSIFIED',
+    '>breaking'      => 'Breaking changes',
+    '>breaking-java' => 'Breaking Java changes',
+    '>deprecation'   => 'Deprecations',
+    '>feature'       => 'New features',
+    '>enhancement'   => 'Enhancements',
+    '>bug'           => 'Bug fixes',
+    '>regression'    => 'Regressions',
+    '>upgrade'       => 'Upgrades',
+    'other'          => 'NOT CLASSIFIED',
+);
+
+my %Area_Overrides = (
+    ':ml'            => 'Machine Learning',
+    ':beats'         => 'Beats Plugin',
+    ':Docs'          => 'Docs Infrastructure'
 );
 
 use JSON();
@@ -67,31 +75,40 @@ sub dump_issues {
     my $issues  = shift;
 
     $version =~ s/v//;
+    my $branch = $version;
+    $branch =~ s/\.\d+$//;
+
     my ( $day, $month, $year ) = (gmtime)[ 3 .. 5 ];
     $month++;
     $year += 1900;
 
-    print <<"HTML";
-<html>
-<head>
-  <meta charset="UTF-8">
-</head>
-<body>
-HTML
+    print <<"ASCIIDOC";
+:issue: https://github.com/${User_Repo}issues/
+:pull:  https://github.com/${User_Repo}pull/
+
+[[release-notes-$version]]
+== $version Release Notes
+
+coming[$version]
+
+Also see <<breaking-changes-$branch>>.
+
+ASCIIDOC
 
     for my $group ( @Groups, 'other' ) {
         my $group_issues = $issues->{$group} or next;
-        print "<h2>$Group_Labels{$group}</h2>\n\n<ul>\n";
+        my $group_id = $group;
+        $group_id =~ s/^>//;
+        print "[[$group_id-$version]]\n"
+            . "[float]\n"
+            . "=== $Group_Labels{$group}\n\n";
 
         for my $header ( sort keys %$group_issues ) {
             my $header_issues = $group_issues->{$header};
-            my $prefix        = "<li>";
-            if ($header) {
-                print "<li>$header:<ul>";
-            }
+            print( $header || 'HEADER MISSING', "::\n" );
+
             for my $issue (@$header_issues) {
                 my $title = $issue->{title};
-                $title =~ s{`([^`]+)`}{<code>$1</code>}g;
 
                 if ( $issue->{state} eq 'open' ) {
                     $title .= " [OPEN]";
@@ -101,30 +118,23 @@ HTML
                 }
                 my $number = $issue->{number};
 
-                print encode_utf8( $prefix
-                        . $title
-                        . qq[ <a href="${Issue_URL}${number}">#${number}</a>] );
+                print encode_utf8("* $title {pull}${number}[#${number}]");
 
                 if ( my $related = $issue->{related_issues} ) {
                     my %uniq = map { $_ => 1 } @$related;
                     print keys %uniq > 1
                         ? " (issues: "
                         : " (issue: ";
-                    print join ", ",
-                        map {qq[<a href="${Issue_URL}${_}">#${_}</a>]}
+                    print join ", ", map {"{issue}${_}[#${_}]"}
                         sort keys %uniq;
                     print ")";
                 }
-                print "</li>\n";
+                print "\n";
             }
-            if ($header) {
-                print "</ul></li>\n";
-            }
+            print "\n";
         }
-        print "</ul>";
         print "\n\n";
     }
-    print "</body></html>\n";
 }
 
 #===================================
@@ -163,8 +173,22 @@ sub fetch_issues {
 ISSUE:
     for my $issue (@issues) {
         next if $seen{ $issue->{number} } && !$issue->{pull_request};
+
+        for ( @{ $issue->{labels} } ) {
+            next ISSUE if $Ignore{ $_->{name} };
+        }
+
+        # uncomment for including/excluding PRs already issued in other versions
+        # next if grep {$_->{name}=~/^v2/} @{$issue->{labels}};
         my %labels = map { $_->{name} => 1 } @{ $issue->{labels} };
-        my ($header) = map { substr( $_, 1 ) } grep {/^:/} keys %labels;
+        my @area_labels = grep {/^:/} sort keys %labels;
+        my ($header) = map { m{:[^/]+/(.+)} && $1 } @area_labels;
+        if (scalar @area_labels > 1) {
+            $header = "MULTIPLE AREA LABELS";
+        }
+        if (scalar @area_labels == 1 && exists $Area_Overrides{$area_labels[0]}) {
+            $header = $Area_Overrides{$area_labels[0]};
+        }
         $header ||= 'NOT CLASSIFIED';
         for (@Groups) {
             if ( $labels{$_} ) {

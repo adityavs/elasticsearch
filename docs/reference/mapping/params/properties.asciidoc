@@ -7,7 +7,7 @@ contain sub-fields, called `properties`. These properties may be of any
 be added:
 
 * explicitly by defining them when <<indices-create-index,creating an index>>.
-* explicitily by defining them when adding or updating a mapping type with the <<indices-put-mapping,PUT mapping>> API.
+* explicitly by defining them when adding or updating a mapping type with the <<indices-put-mapping,PUT mapping>> API.
 * <<dynamic-mapping,dynamically>> just by indexing documents containing new fields.
 
 Below is an example of adding `properties` to a mapping type, an `object`
@@ -18,19 +18,19 @@ field, and a `nested` field:
 PUT my_index
 {
   "mappings": {
-    "my_type": { <1>
+    "_doc": { <1>
       "properties": {
         "manager": { <2>
           "properties": {
             "age":  { "type": "integer" },
-            "name": { "type": "string"  }
+            "name": { "type": "text"  }
           }
         },
         "employees": { <3>
           "type": "nested",
           "properties": {
             "age":  { "type": "integer" },
-            "name": { "type": "string"  }
+            "name": { "type": "text"  }
           }
         }
       }
@@ -38,7 +38,7 @@ PUT my_index
   }
 }
 
-PUT my_index/my_type/1 <4>
+PUT my_index/_doc/1 <4>
 {
   "region": "US",
   "manager": {
@@ -57,8 +57,8 @@ PUT my_index/my_type/1 <4>
   ]
 }
 --------------------------------------------------
-// AUTOSENSE
-<1> Properties under the `my_type` mapping type.
+// CONSOLE
+<1> Properties under the `_doc` mapping type.
 <2> Properties under the `manager` object field.
 <3> Properties under the `employees` nested field.
 <4> An example document which corresponds to the above mapping.
@@ -78,7 +78,7 @@ GET my_index/_search
 {
   "query": {
     "match": {
-      "manager.name": "Alice White" <1>
+      "manager.name": "Alice White" 
     }
   },
   "aggs": {
@@ -89,7 +89,7 @@ GET my_index/_search
       "aggs": {
         "Employee Ages": {
           "histogram": {
-            "field": "employees.age", <2>
+            "field": "employees.age", 
             "interval": 5
           }
         }
@@ -98,8 +98,7 @@ GET my_index/_search
   }
 }
 --------------------------------------------------
-// AUTOSENSE
+// CONSOLE
+// TEST[continued]
 
 IMPORTANT: The full path to the inner field must be specified.
-
-

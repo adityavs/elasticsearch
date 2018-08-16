@@ -2,40 +2,40 @@
 == cat nodeattrs
 
 The `nodeattrs` command shows custom node attributes.
+For example:
 
-["source","sh",subs="attributes,callouts"]
+[source,js]
 --------------------------------------------------
-% curl 192.168.56.10:9200/_cat/nodeattrs
-node       host    ip          attr  value
-Black Bolt epsilon 192.168.1.8 rack  rack314
-Black Bolt epsilon 192.168.1.8 azone us-east-1
+GET /_cat/nodeattrs?v
 --------------------------------------------------
+// CONSOLE
+// TEST[s/\?v/\?v&s=node,attr/]
+// Sort the resulting attributes so we can assert on them more easilly
 
-The first few columns give you basic info per node.
+Could look like:
 
-
-["source","sh",subs="attributes,callouts"]
+[source,txt]
 --------------------------------------------------
-node       host    ip
-Black Bolt epsilon 192.168.1.8
-Black Bolt epsilon 192.168.1.8
+node    host      ip        attr     value
+...
+node-0 127.0.0.1 127.0.0.1 testattr test
+...
 --------------------------------------------------
+// TESTRESPONSE[s/\.\.\.\n$/\n(.+ xpack\\.installed true\n)?\n/]
+// TESTRESPONSE[s/\.\.\.\n/(.+ ml\\..+\n)*/ _cat]
+// If xpack is not installed then neither ... with match anything
+// If xpack is installed then the first ... contains ml attributes
+// and the second contains xpack.installed=true
 
-
-The attr and value columns can give you a picture of custom node attributes.
-
-[source,sh]
---------------------------------------------------
-attr  value
-rack  rack314
-azone us-east-1
---------------------------------------------------
+The first few columns (`node`, `host`, `ip`) give you basic info per node
+and the `attr` and `value` columns give you the custom node attributes,
+one per line.
 
 [float]
 === Columns
 
 Below is an exhaustive list of the existing headers that can be
-passed to `nodes?h=` to retrieve the relevant details in ordered
+passed to `nodeattrs?h=` to retrieve the relevant details in ordered
 columns.  If no headers are specified, then those marked to Appear
 by Default will appear. If any header is specified, then the defaults
 are not used.
@@ -49,18 +49,34 @@ by default.  To have the headers appear in the output, use verbose
 mode (`v`). The header name will match the supplied value (e.g.,
 `pid` versus `p`).  For example:
 
-["source","sh",subs="attributes,callouts"]
+[source,js]
 --------------------------------------------------
-% curl 192.168.56.10:9200/_cat/nodeattrs?v&h=name,pid,attr,value
-name       pid   attr  value
-Black Bolt 28000 rack  rack314
-Black Bolt 28000 azone us-east-1
+GET /_cat/nodeattrs?v&h=name,pid,attr,value
 --------------------------------------------------
+// CONSOLE
+// TEST[s/,value/,value&s=node,attr/]
+// Sort the resulting attributes so we can assert on them more easilly
+
+Might look like:
+
+[source,txt]
+--------------------------------------------------
+name    pid   attr     value
+...
+node-0 19566 testattr test
+...
+--------------------------------------------------
+// TESTRESPONSE[s/19566/\\d*/]
+// TESTRESPONSE[s/\.\.\.\n$/\n(.+ xpack\\.installed true\n)?\n/]
+// TESTRESPONSE[s/\.\.\.\n/(.+ ml\\..+\n)*/ _cat]
+// If xpack is not installed then neither ... with match anything
+// If xpack is installed then the first ... contains ml attributes
+// and the second contains xpack.installed=true
 
 [cols="<,<,<,<,<",options="header",subs="normal"]
 |=======================================================================
 |Header |Alias |Appear by Default |Description |Example
-|`node`|`name`|Yes|Name of the node|Black Bolt
+|`node`|`name`|Yes|Name of the node|DKDM97B
 |`id` |`nodeId` |No |Unique node ID |k0zy
 |`pid` |`p` |No |Process ID |13061
 |`host` |`h` |Yes |Host name |n1

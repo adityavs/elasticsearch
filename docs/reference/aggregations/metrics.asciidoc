@@ -13,11 +13,15 @@ bucket aggregations (some bucket aggregations enable you to sort the returned bu
 
 include::metrics/avg-aggregation.asciidoc[]
 
+include::metrics/weighted-avg-aggregation.asciidoc[]
+
 include::metrics/cardinality-aggregation.asciidoc[]
 
 include::metrics/extendedstats-aggregation.asciidoc[]
 
 include::metrics/geobounds-aggregation.asciidoc[]
+
+include::metrics/geocentroid-aggregation.asciidoc[]
 
 include::metrics/max-aggregation.asciidoc[]
 

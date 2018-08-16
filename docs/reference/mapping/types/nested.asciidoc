@@ -2,8 +2,8 @@
 === Nested datatype
 
 The `nested` type is a specialised version of the <<object,`object`>> datatype
-that allows arrays of objects to be indexed and queried independently of each
-other.
+that allows arrays of objects to be indexed in a way that they can be queried 
+independently of each other.
 
 ==== How arrays of objects are flattened
 
@@ -14,7 +14,7 @@ following document:
 
 [source,js]
 --------------------------------------------------
-PUT my_index/my_type/1
+PUT my_index/_doc/1
 {
   "group" : "fans",
   "user" : [ <1>
@@ -29,7 +29,7 @@ PUT my_index/my_type/1
   ]
 }
 --------------------------------------------------
-// AUTOSENSE
+// CONSOLE
 <1> The `user` field is dynamically added as a field of type `object`.
 
 would be transformed internally into a document that looks more like this:
@@ -42,6 +42,7 @@ would be transformed internally into a document that looks more like this:
   "user.last" :  [ "smith", "white" ]
 }
 --------------------------------------------------
+// NOTCONSOLE
 
 The `user.first` and `user.last` fields are flattened into multi-value fields,
 and the association between `alice` and `white` is lost.  This document would
@@ -55,18 +56,19 @@ GET my_index/_search
     "bool": {
       "must": [
         { "match": { "user.first": "Alice" }},
-        { "match": { "user.last":  "White" }}
+        { "match": { "user.last":  "Smith" }}
       ]
     }
   }
 }
 --------------------------------------------------
-// AUTOSENSE
+// CONSOLE
+// TEST[continued]
 
 ==== Using `nested` fields for arrays of objects
 
 If you need to index arrays of objects and to maintain the independence of
-each object in the array, you should used the `nested` datatype instead of the
+each object in the array, you should use the `nested` datatype instead of the
 <<object,`object`>> datatype.  Internally, nested objects index each object in
 the array as a separate hidden document, meaning that each nested object can be
 queried independently of the others, with the <<query-dsl-nested-query,`nested` query>>:
@@ -76,7 +78,7 @@ queried independently of the others, with the <<query-dsl-nested-query,`nested` 
 PUT my_index
 {
   "mappings": {
-    "my_type": {
+    "_doc": {
       "properties": {
         "user": {
           "type": "nested" <1>
@@ -86,7 +88,7 @@ PUT my_index
   }
 }
 
-PUT my_index/my_type/1
+PUT my_index/_doc/1
 {
   "group" : "fans",
   "user" : [
@@ -110,7 +112,7 @@ GET my_index/_search
         "bool": {
           "must": [
             { "match": { "user.first": "Alice" }},
-            { "match": { "user.last":  "White" }} <2>
+            { "match": { "user.last":  "Smith" }} <2>
           ]
         }
       }
@@ -127,7 +129,7 @@ GET my_index/_search
         "bool": {
           "must": [
             { "match": { "user.first": "Alice" }},
-            { "match": { "user.last":  "Smith" }} <3>
+            { "match": { "user.last":  "White" }} <3>
           ]
         }
       },
@@ -142,9 +144,9 @@ GET my_index/_search
   }
 }
 --------------------------------------------------
-// AUTOSENSE
+// CONSOLE
 <1> The `user` field is mapped as type `nested` instead of type `object`.
-<2> This query doesn't match because `Alice` and `White` are not in the same nested object.
+<2> This query doesn't match because `Alice` and `Smith` are not in the same nested object.
 <3> This query matches because `Alice` and `White` are in the same nested object.
 <4> `inner_hits` allow us to highlight the matching nested documents.
 
@@ -170,13 +172,6 @@ The following parameters are accepted by `nested` fields:
     Whether or not new `properties` should be added dynamically to an existing
     nested object.  Accepts `true` (default), `false` and `strict`.
 
-<<include-in-all,`include_in_all`>>::
-
-    Sets the default `include_in_all` value for all the `properties` within
-    the nested object. Nested documents do not have their own `_all` field.
-    Instead, values are added to the `_all` field of the main ``root''
-    document.
-
 <<properties,`properties`>>::
 
     The fields within the nested object, which can be of any
@@ -189,13 +184,30 @@ The following parameters are accepted by `nested` fields:
 
 Because nested documents are indexed as separate documents, they can only be
 accessed  within the scope of the `nested` query, the
-`nested`/`reverse_nested`, or <<nested-inner-hits,nested inner hits>>.
+`nested`/`reverse_nested` aggregations, or <<nested-inner-hits,nested inner hits>>.
 
 For instance, if a string field within a nested document has
 <<index-options,`index_options`>> set to `offsets` to allow use of the postings
-highlighter, these offsets will not be available during the main highlighting
+during the highlighting, these offsets will not be available during the main highlighting
 phase.  Instead, highlighting needs to be performed via
 <<nested-inner-hits,nested inner hits>>.
 
 =============================================
+
+
+==== Limiting the number of `nested` fields
+
+Indexing a document with 100 nested fields actually indexes 101 documents as each nested
+document is indexed as a separate document. To safeguard against ill-defined mappings
+the number of nested fields that can be defined per index has been limited to 50. See
+<<mapping-limit-settings>>.
+
+
+==== Limiting the number of `nested` json objects
+Indexing a document with an array of 100 objects within a nested field, will actually
+create 101 documents, as each nested object will be indexed as a separate document.
+To prevent out of memory errors when a single document contains too many nested json
+objects, the number of nested json objects that a single document may contain across all fields
+has been limited to 10000. See <<mapping-limit-settings>>.
+
 
